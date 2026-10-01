@@ -2088,21 +2088,28 @@ public class FileDataStorageManager {
             cv.put(ProviderTableMeta.FILE_ETAG_IN_CONFLICT, etagInConflict);
         }
 
+        String selection = ProviderTableMeta._ID + "=? AND " + ProviderTableMeta.FILE_ACCOUNT_OWNER + "=?";
+        String[] selectionArgs = {String.valueOf(ocFile.getFileId()), user.getAccountName()};
+        if (etagInConflict == null || !ocFile.isDown()) {
+            // Only a cleared persisted conflict requires recalculating ancestor conflict markers.
+            selection += " AND " + ProviderTableMeta.FILE_ETAG_IN_CONFLICT + " IS NOT NULL";
+        }
+
         int updated = 0;
         if (getContentResolver() != null) {
             updated = getContentResolver().update(
                 ProviderTableMeta.CONTENT_URI_FILE,
                 cv,
-                ProviderTableMeta._ID + "=?",
-                new String[]{String.valueOf(ocFile.getFileId())}
+                selection,
+                selectionArgs
                                                  );
         } else {
             try {
                 updated = getContentProviderClient().update(
                     ProviderTableMeta.CONTENT_URI_FILE,
                     cv,
-                    ProviderTableMeta._ID + "=?",
-                    new String[]{String.valueOf(ocFile.getFileId())}
+                    selection,
+                    selectionArgs
                                                            );
             } catch (RemoteException e) {
                 Log_OC.e(TAG, "Failed saving conflict in database " + e.getMessage(), e);
@@ -2229,6 +2236,36 @@ public class FileDataStorageManager {
                     Log_OC.d(TAG, "checking parents to remove conflict; NEXT " + parentPath);
                 }
             }
+        }
+    }
+
+    public void clearFolderConflictIfResolved(OCFile folder) {
+        String selection = ProviderTableMeta.FILE_ACCOUNT_OWNER + "=? AND " +
+            ProviderTableMeta.FILE_PATH + " >= ? AND " + ProviderTableMeta.FILE_PATH + " < ? AND " +
+            ProviderTableMeta.FILE_CONTENT_TYPE + " NOT IN (?, ?) AND " +
+            ProviderTableMeta.FILE_ETAG_IN_CONFLICT + " IS NOT NULL";
+        String path = folder.getRemotePath();
+        String upperBound = path.substring(0, path.length() - 1) + "0";
+        String[] arguments = {user.getAccountName(), path, upperBound, MimeType.DIRECTORY, MimeType.WEBDAV_FOLDER};
+        try (Cursor conflicts = getContentResolver() != null
+            ? getContentResolver().query(ProviderTableMeta.CONTENT_URI_FILE,
+                                        new String[]{ProviderTableMeta._ID}, selection, arguments, null)
+            : getContentProviderClient().query(ProviderTableMeta.CONTENT_URI_FILE,
+                                              new String[]{ProviderTableMeta._ID}, selection, arguments, null)) {
+            if (conflicts == null || conflicts.getCount() != 0) {
+                return;
+            }
+            ContentValues values = new ContentValues();
+            values.putNull(ProviderTableMeta.FILE_ETAG_IN_CONFLICT);
+            String where = ProviderTableMeta._ID + "=? AND " + ProviderTableMeta.FILE_ACCOUNT_OWNER + "=?";
+            String[] whereArgs = {String.valueOf(folder.getFileId()), user.getAccountName()};
+            if (getContentResolver() != null) {
+                getContentResolver().update(ProviderTableMeta.CONTENT_URI_FILE, values, where, whereArgs);
+            } else {
+                getContentProviderClient().update(ProviderTableMeta.CONTENT_URI_FILE, values, where, whereArgs);
+            }
+        } catch (RemoteException e) {
+            Log_OC.e(TAG, "Failed reconciling folder conflict " + e.getMessage(), e);
         }
     }
 

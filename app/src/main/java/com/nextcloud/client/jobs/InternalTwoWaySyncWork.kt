@@ -10,6 +10,7 @@ package com.nextcloud.client.jobs
 import android.content.Context
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.nextcloud.client.account.User
 import com.nextcloud.client.account.UserAccountManager
 import com.nextcloud.client.device.PowerManagementService
 import com.nextcloud.client.network.ConnectivityService
@@ -68,16 +69,7 @@ class InternalTwoWaySyncWork(
                 }
 
                 Log_OC.d(TAG, "Folder ${folder.remotePath}: started!")
-                operation =
-                    SynchronizeFolderOperation(
-                        context,
-                        folder.remotePath,
-                        user,
-                        fileDataStorageManager,
-                        false,
-                        false
-                    )
-                val operationResult = operation?.execute(context)
+                val operationResult = synchronizeFolder(user, folder, fileDataStorageManager)
 
                 if (operationResult?.isSuccess == true) {
                     Log_OC.d(TAG, "Folder ${folder.remotePath}: finished!")
@@ -97,6 +89,27 @@ class InternalTwoWaySyncWork(
             Log_OC.d(TAG, "Worker finished with failure!")
             Result.failure()
         }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun synchronizeFolder(
+        user: User,
+        folder: OCFile,
+        storage: FileDataStorageManager
+    ): RemoteOperationResult<*>? = try {
+        operation = SynchronizeFolderOperation(
+            context,
+            folder.remotePath,
+            user,
+            storage,
+            false,
+            // Metadata refreshes can cache ancestor ETags before descendants have been synchronized.
+            true
+        )
+        operation?.execute(context)
+    } catch (exception: RuntimeException) {
+        Log_OC.e(TAG, "Folder ${folder.remotePath}: synchronization threw an exception", exception)
+        RemoteOperationResult<Any>(exception)
     }
 
     private fun saveSyncResult(storage: FileDataStorageManager, folder: OCFile, result: RemoteOperationResult<*>?) {

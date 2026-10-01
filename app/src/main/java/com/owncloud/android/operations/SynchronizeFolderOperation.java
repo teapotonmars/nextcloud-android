@@ -532,7 +532,9 @@ public class SynchronizeFolderOperation extends SyncOperation {
             final var file = synchronizeFileOperation.getLocalFile();
 
             if (result.isSuccess() && file != null) {
-                notificationManager.showProgressNotification(folderName, file.getFileName(), current, total);
+                if (synchronizeFileOperation.getTransferWasRequested()) {
+                    notificationManager.showProgressNotification(folderName, file.getFileName(), current, total);
+                }
             } else {
                 if (result.getCode() == ResultCode.SYNC_CONFLICT) {
                     mConflictsFound++;

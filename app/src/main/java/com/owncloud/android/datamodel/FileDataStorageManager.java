@@ -568,6 +568,55 @@ public class FileDataStorageManager {
         return mediaList;
     }
 
+    public String getFolderSyncSnapshot(String remotePath) {
+        OCFile folder = getFileByPath(remotePath);
+        if (folder == null || !FolderSyncSnapshot.supportsSkipping(folder, this)) {
+            return "";
+        }
+        return fileDao.getFolderSyncSnapshot(user.getAccountName(), folder.getFileId());
+    }
+
+    public void saveFolderSyncSnapshot(String remotePath, String snapshot) {
+        OCFile folder = getFileByPath(remotePath);
+        if (folder == null || !FolderSyncSnapshot.supportsSkipping(folder, this)) {
+            return;
+        }
+        fileDao.setFolderSyncSnapshot(user.getAccountName(), folder.getFileId(), snapshot);
+    }
+
+    public void updateFolderSize(OCFile folder) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSize(
+            user.getAccountName(), folder.getFileId(), folder.getFileLength()));
+    }
+
+    public void saveSynchronizedFolder(OCFile remoteFolder, OCFile localFolder,
+                                       List<OCFile> children, Collection<OCFile> removed) {
+        FolderSyncLocalState.preserve(remoteFolder, localFolder);
+        saveFolder(remoteFolder, children, removed);
+        updateFolderSize(remoteFolder);
+    }
+
+    public void updateFolderSyncTime(OCFile folder, long timestamp) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSyncTime(user.getAccountName(), folder.getFileId(), timestamp));
+        folder.setLastSyncDateForData(timestamp);
+    }
+
+    private static String internalSyncResultOrEmpty(String result) {
+        return result == null ? "" : result;
+    }
+
+    private void notifyFolderUpdate(OCFile folder, int updatedRows) {
+        if (updatedRows == 0) {
+            return;
+        }
+        ContentResolver resolver = getContentResolver();
+        if (resolver == null) {
+            resolver = MainApp.getAppContext().getContentResolver();
+        }
+        resolver.notifyChange(ProviderTableMeta.CONTENT_URI, null);
+        resolver.notifyChange(ContentUris.withAppendedId(ProviderTableMeta.CONTENT_URI_DIR, folder.getParentId()), null);
+    }
+
     public boolean saveFile(OCFile ocFile) {
         Log_OC.d(TAG, "saving file " + ocFile.getFileName() + " into " + ocFile.getRemotePath());
 
@@ -1351,6 +1400,7 @@ public class FileDataStorageManager {
         ocFile.setHidden(nullToZero(fileEntity.getHidden()) == 1);
         ocFile.setE2eCounter(fileEntity.getE2eCounter());
         ocFile.setInternalFolderSyncTimestamp(nullToMinusOne(fileEntity.getInternalTwoWaySync()));
+        ocFile.setInternalFolderSyncResult(internalSyncResultOrEmpty(fileEntity.getInternalTwoWaySyncResult()));
 
         String sharees = fileEntity.getSharees();
         // Surprisingly JSON deserialization causes significant overhead.

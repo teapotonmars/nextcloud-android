@@ -6,7 +6,6 @@
  */
 package com.owncloud.android.operations;
 import android.content.Context;
-import android.content.Intent;
 import android.text.TextUtils;
 import com.nextcloud.client.account.User;
 import com.nextcloud.client.jobs.download.FileDownloadHelper;
@@ -21,7 +20,6 @@ import com.owncloud.android.lib.common.utils.Log_OC;
 import com.owncloud.android.lib.resources.files.ReadFileRemoteOperation;
 import com.owncloud.android.lib.resources.files.ReadFolderRemoteOperation;
 import com.owncloud.android.lib.resources.files.model.RemoteFile;
-import com.owncloud.android.services.OperationsService;
 import com.owncloud.android.utils.FileStorageUtils;
 import com.owncloud.android.utils.MimeTypeUtil;
 import org.junit.rules.TemporaryFolder;
@@ -42,7 +40,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -51,6 +48,7 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 final class FolderSyncFixture implements AutoCloseable {
     static final String ROOT = "/root/";
+    final Map<String, Object> encryptedMetadata = new HashMap<>();
     final Map<String, OCFile> local = new LinkedHashMap<>();
     final Map<String, OCFile> remote = new LinkedHashMap<>();
     final Set<String> failedListings = new HashSet<>();
@@ -67,6 +65,7 @@ final class FolderSyncFixture implements AutoCloseable {
     final FileDataStorageManager storage = mock(FileDataStorageManager.class);
     final OwnCloudClient client = mock(OwnCloudClient.class);
     Runnable afterListing = () -> { };
+    java.util.function.Consumer<String> beforeFolder = path -> { };
     int notificationUpdates;
     int folderRowsWritten;
     private final TemporaryFolder files;
@@ -95,6 +94,8 @@ final class FolderSyncFixture implements AutoCloseable {
                 OCFile file = call.getArgument(0);
                 OCFile server = remote.get(file.getRemotePath());
                 file.setEtag(server.getEtag());
+                file.setEtagOnServer(server.getEtag());
+                file.setModificationTimestamp(server.getModificationTimestamp());
                 file.setStoragePath(files.newFile().getAbsolutePath());
                 file.setLastSyncDateForData(System.currentTimeMillis());
                 file.setModificationTimestampAtLastSyncForData(server.getModificationTimestamp());
@@ -111,7 +112,11 @@ final class FolderSyncFixture implements AutoCloseable {
         MockedStatic<FileStorageUtils> fileUtils = keep(mockStatic(FileStorageUtils.class));
         fileUtils.when(() -> FileStorageUtils.fillOCFile(any(RemoteFile.class)))
             .thenAnswer(call -> copy(snapshots.get(call.getArgument(0))));
+        fileUtils.when(() -> FileStorageUtils.checkEncryptionStatus(any(OCFile.class), any()))
+            .thenAnswer(call -> encryptedMetadata.containsKey(((OCFile) call.getArgument(0)).getRemotePath()));
         MockedStatic<RefreshFolderOperation> refresh = keep(mockStatic(RefreshFolderOperation.class));
+        refresh.when(() -> RefreshFolderOperation.getDecryptedFolderMetadata(anyBoolean(), any(), any(), any(), any()))
+            .thenAnswer(call -> encryptedMetadata.get(((OCFile) call.getArgument(1)).getRemotePath()));
         refresh.when(() -> RefreshFolderOperation.prefillLocalFilesMap(any(), any()))
             .thenAnswer(call -> {
                 Map<String, OCFile> children = new HashMap<>();
@@ -140,23 +145,12 @@ final class FolderSyncFixture implements AutoCloseable {
                 return result(!failedListings.contains(path), data);
             });
         }));
-        keep(mockConstruction(Intent.class, (intent, ignored) -> {
-            when(intent.putExtra(eq(OperationsService.EXTRA_SYNC_ALL), anyBoolean())).thenAnswer(call -> {
-                recursiveModes.add(call.getArgument(1));
-                return intent;
-            });
-            when(intent.putExtra(eq(OperationsService.EXTRA_REMOTE_PATH), anyString()))
-                .thenAnswer(call -> {
-                    String path = call.getArgument(1);
-                    org.junit.Assert.assertTrue("Child queued before save: " + path, local.containsKey(path));
-                    queue.add(path);
-                    return intent;
-                });
-        }));
+        keep(new FolderSyncIntentMock(queue, recursiveModes, local));
         when(user.getAccountName()).thenReturn("fixture-account");
         when(storage.getFileByPath(anyString())).thenAnswer(call -> local.get(call.getArgument(0)));
         when(storage.getFolderContent(any(OCFile.class), anyBoolean()))
-            .thenAnswer(call -> children(local, ((OCFile) call.getArgument(0)).getRemotePath()));
+            .thenAnswer(call -> children(local, ((OCFile) call.getArgument(0)).getRemotePath()).stream()
+                .map(org.mockito.Mockito::spy).toList());
         doAnswer(call -> {
             OCFile folder = call.getArgument(0);
             folderRowsWritten += 1 + ((List<?>) call.getArgument(1)).size();
@@ -170,7 +164,12 @@ final class FolderSyncFixture implements AutoCloseable {
                 }
                 local.put(file.getRemotePath(), file);
             }
-            local.put(folder.getRemotePath(), folder);
+            OCFile saved = copy(folder);
+            saved.setFileLength(0);
+            saved.setFileId(folder.getFileId());
+            saved.setStoragePath(local.get(folder.getRemotePath()).getStoragePath());
+            saved.setEtagInConflict(local.get(folder.getRemotePath()).getEtagInConflict());
+            local.put(folder.getRemotePath(), saved);
             return null;
         }).when(storage).saveFolder(any(), any(), any());
         keep(new FolderSyncRowMock(storage, local));
@@ -197,10 +196,12 @@ final class FolderSyncFixture implements AutoCloseable {
         }
     }
     void syncTree() { syncTree(true); }
-    void syncTree(boolean syncAll) {
-        queue.add(ROOT);
+    void syncTree(boolean syncAll) { syncTree(ROOT, syncAll); }
+    void syncTree(String root, boolean syncAll) {
+        queue.add(root);
         while (!queue.isEmpty()) {
             String path = queue.remove();
+            beforeFolder.accept(path);
             Map<String, SynchronizeFileOperation> operations = new HashMap<>();
             for (OCFile server : children(remote, path)) {
                 if (!server.isFolder()) {
@@ -212,6 +213,9 @@ final class FolderSyncFixture implements AutoCloseable {
                 SynchronizeFileOperation.class, (operation, construction) -> {
                     OCFile server = (OCFile) construction.arguments().get(1);
                     SynchronizeFileOperation actual = operations.get(server.getRemotePath());
+                    Field serverField = SynchronizeFileOperation.class.getDeclaredField("serverFile");
+                    serverField.setAccessible(true);
+                    serverField.set(actual, server);
                     when(operation.execute(context)).thenAnswer(call -> {
                         fileChecks.add(server.getRemotePath());
                         return actual.execute(client);
@@ -219,11 +223,13 @@ final class FolderSyncFixture implements AutoCloseable {
                     when(operation.getLocalFile()).thenAnswer(call -> actual.getLocalFile());
                     when(operation.getTransferWasRequested()).thenAnswer(call -> actual.getTransferWasRequested());
                 })) {
-                results.add(new SynchronizeFolderOperation(context, path, user, storage, false, syncAll).run(client));
+                SynchronizeFolderOperation operation =
+                    new SynchronizeFolderOperation(context, path, user, storage, false, syncAll);
+                operation.setRecursiveChild(!ROOT.equals(path));
+                results.add(operation.run(client));
             }
         }
     }
-
     void resetCounts() {
         downloads.clear();
         uploads.clear();
@@ -235,7 +241,6 @@ final class FolderSyncFixture implements AutoCloseable {
         notificationUpdates = 0;
         folderRowsWritten = 0;
     }
-
     private RemoteFile snapshot(OCFile file) {
         RemoteFile result = mock(RemoteFile.class);
         when(result.getEtag()).thenReturn(file.getEtag());
@@ -244,13 +249,8 @@ final class FolderSyncFixture implements AutoCloseable {
     }
 
     private OCFile copy(OCFile file) {
-        OCFile copy = new OCFile(file.getRemotePath());
-        copy.setMimeType(file.getMimeType());
-        copy.setEtag(file.getEtag());
-        copy.setModificationTimestamp(file.getModificationTimestamp());
-        return copy;
+        return FolderSyncFileCopy.copy(file);
     }
-
     private List<OCFile> children(Map<String, OCFile> source, String folder) {
         List<OCFile> children = new ArrayList<>();
         for (OCFile file : source.values()) {
@@ -265,7 +265,6 @@ final class FolderSyncFixture implements AutoCloseable {
         }
         return children;
     }
-
     private RemoteOperationResult result(boolean success, List<Object> data) {
         RemoteOperationResult result = mock(RemoteOperationResult.class);
         when(result.isSuccess()).thenReturn(success);

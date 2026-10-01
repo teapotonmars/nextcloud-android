@@ -10,28 +10,26 @@ import com.owncloud.android.datamodel.FileDataStorageManager;
 import com.owncloud.android.datamodel.OCFile;
 import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.spy;
 
 final class FolderSyncRowMock implements AutoCloseable {
     FolderSyncRowMock(FileDataStorageManager storage, Map<String, OCFile> local) {
+        doAnswer(call -> {
+            call.callRealMethod();
+            return null;
+        }).when(storage).saveSynchronizedFolder(any(), any(), any(), any());
+        when(storage.getFileById(anyLong())).thenAnswer(call -> {
+            long id = call.getArgument(0);
+            OCFile row = local.values().stream().filter(file -> file.getFileId() == id).findFirst().orElse(null);
+            return row == null ? null : spy(row);
+        });
         when(storage.saveFile(any())).thenAnswer(call -> {
             OCFile file = call.getArgument(0);
             OCFile stored = local.get(file.getRemotePath());
-            OCFile persisted = file;
-            if (file.isFolder()) {
-                persisted = new OCFile(file.getRemotePath());
-                persisted.setMimeType(file.getMimeType());
-                persisted.setFileId(file.getFileId());
-                persisted.setParentId(file.getParentId());
-                persisted.setRemoteId(file.getRemoteId());
-                persisted.setPermissions(file.getPermissions());
-                persisted.setFileLength(file.getFileLength());
-                persisted.setModificationTimestamp(file.getModificationTimestamp());
-                persisted.setLastSyncDateForData(file.getLastSyncDateForData());
-                persisted.setModificationTimestampAtLastSyncForData(file.getModificationTimestampAtLastSyncForData());
-                persisted.setInternalFolderSyncTimestamp(file.getInternalFolderSyncTimestamp());
-                persisted.setInternalFolderSyncResult(file.getInternalFolderSyncResult());
-            }
+            OCFile persisted = spy(file);
             if (file.isFolder() && stored != null) {
                 persisted.setEtag(stored.getEtag());
                 persisted.setStoragePath(stored.getStoragePath());
@@ -39,7 +37,16 @@ final class FolderSyncRowMock implements AutoCloseable {
             local.put(file.getRemotePath(), persisted);
             return true;
         });
-
+        doAnswer(call -> {
+            OCFile folder = call.getArgument(0);
+            local.get(folder.getRemotePath()).setFileLength(folder.getFileLength());
+            return null;
+        }).when(storage).updateFolderSize(any());
+        doAnswer(call -> {
+            OCFile file = call.getArgument(0);
+            file.setLastSyncDateForData(call.getArgument(1));
+            return null;
+        }).when(storage).updateFolderSyncTime(any(), anyLong());
     }
 
     @Override

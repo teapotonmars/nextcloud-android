@@ -17,6 +17,18 @@ import com.owncloud.android.utils.MimeType
 @Suppress("TooManyFunctions")
 @Dao
 interface FileDao {
+    @Query("SELECT folder_sync_snapshot FROM filelist WHERE _id = :id AND file_owner = :fileOwner")
+    fun getFolderSyncSnapshot(fileOwner: String, id: Long): String?
+
+    @Query("UPDATE filelist SET folder_sync_snapshot = :snapshot WHERE _id = :id AND file_owner = :fileOwner")
+    fun setFolderSyncSnapshot(fileOwner: String, id: Long, snapshot: String)
+
+    @Query("UPDATE filelist SET last_sync_date_for_data = :timestamp WHERE _id = :id AND file_owner = :fileOwner")
+    fun updateFolderSyncTime(fileOwner: String, id: Long, timestamp: Long): Int
+
+    @Query("UPDATE filelist SET content_length = :size WHERE _id = :id AND file_owner = :fileOwner")
+    fun updateFolderSize(fileOwner: String, id: Long, size: Long): Int
+
     @Update
     fun update(entity: FileEntity)
 

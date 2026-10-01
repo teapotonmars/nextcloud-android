@@ -143,18 +143,19 @@ public class SynchronizeFolderOperation extends SyncOperation {
                 return new RemoteOperationResult<>(ResultCode.FILE_NOT_FOUND);
             }
 
-            result = checkForChanges(client);
-
-            if (result.isSuccess()) {
-                if (mRemoteFolderChanged || syncAll) {
+            if (syncAll) {
+                result = fetchAndSyncRemoteFolder(client);
+            } else {
+                result = checkForChanges(client);
+                if (result.isSuccess() && mRemoteFolderChanged) {
                     result = fetchAndSyncRemoteFolder(client);
-                } else {
+                } else if (result.isSuccess()) {
                     prepareOpsFromLocalKnowledge();
                 }
+            }
 
-                if (result.isSuccess()) {
-                    syncContents(client);
-                }
+            if (result.isSuccess()) {
+                syncContents();
             }
 
             if (mCancellationRequested.get()) {
@@ -262,6 +263,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
         OCFile remoteFolder = FileStorageUtils.fillOCFile((RemoteFile) folderAndFiles.get(0));
         remoteFolder.setParentId(mLocalFolder.getParentId());
         remoteFolder.setFileId(mLocalFolder.getFileId());
+        boolean remoteFolderChanged = !remoteFolder.getEtag().equals(mLocalFolder.getEtag());
 
         Log_OC.d(TAG, "Remote folder " + mLocalFolder.getRemotePath() + " changed - starting update of local data ");
 
@@ -322,7 +324,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
             }
 
             /// add to updatedFile data about LOCAL STATE (not existing in server)
-            updateLocalStateData(remoteFile, localFile, updatedFile);
+            updateLocalStateData(remoteFile, localFile, updatedFile, remoteFolderChanged);
 
             /// check and fix, if needed, local storage path
             FileStorageUtils.searchForLocalFileInDefaultPath(updatedFile, user.getAccountName());
@@ -366,7 +368,10 @@ public class SynchronizeFolderOperation extends SyncOperation {
         }
     }
 
-    private void updateLocalStateData(OCFile remoteFile, OCFile localFile, OCFile updatedFile) {
+    private static void updateLocalStateData(OCFile remoteFile,
+                                             OCFile localFile,
+                                             OCFile updatedFile,
+                                             boolean remoteFolderChanged) {
         updatedFile.setLastSyncDateForProperties(System.currentTimeMillis());
         if (localFile != null) {
             updatedFile.setFileId(localFile.getFileId());
@@ -380,7 +385,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
             if (updatedFile.isFolder()) {
                 updatedFile.setFileLength(localFile.getFileLength());
                     // TODO move operations about size of folders to FileContentProvider
-            } else if (mRemoteFolderChanged && MimeTypeUtil.isImage(remoteFile) &&
+            } else if (remoteFolderChanged && MimeTypeUtil.isImage(remoteFile) &&
                     remoteFile.getModificationTimestamp() !=
                             localFile.getModificationTimestamp()) {
                 updatedFile.setUpdateThumbnailNeeded(true);
@@ -454,33 +459,9 @@ public class SynchronizeFolderOperation extends SyncOperation {
         }
     }
 
-    private void syncContents(OwnCloudClient client) throws OperationCancelledException {
+    private void syncContents() throws OperationCancelledException {
         startDirectDownloads();
         startContentSynchronizations(mFilesToSyncContents);
-        updateETag(client);
-    }
-
-    /**
-     * Updates the eTag of the local folder after a successful synchronization.
-     * This ensures that any changes to local files, which may alter the eTag, are correctly reflected.
-     *
-     * @param client the OwnCloudClient instance used to execute remote operations.
-     */
-    private void updateETag(OwnCloudClient client) {
-        ReadFolderRemoteOperation operation = new ReadFolderRemoteOperation(mRemotePath);
-        final var result = operation.execute(client);
-        if (!result.isSuccess()) {
-            Log_OC.w(TAG, "Cannot update eTag, read folder operation is failed");
-            return;
-        }
-
-        if (result.getData().get(0) instanceof RemoteFile remoteFile) {
-            String eTag = remoteFile.getEtag();
-            mLocalFolder.setEtag(eTag);
-
-            final FileDataStorageManager storageManager = getStorageManager();
-            storageManager.saveFile(mLocalFolder);
-        }
     }
 
     private void startDirectDownloads() {

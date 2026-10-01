@@ -173,11 +173,7 @@ final class FolderSyncFixture implements AutoCloseable {
             local.put(folder.getRemotePath(), folder);
             return null;
         }).when(storage).saveFolder(any(), any(), any());
-        when(storage.saveFile(any())).thenAnswer(call -> {
-            OCFile file = call.getArgument(0);
-            local.put(file.getRemotePath(), file);
-            return true;
-        });
+        keep(new FolderSyncRowMock(storage, local));
         addRemote(ROOT, true);
         OCFile root = copy(remote.get(ROOT));
         root.setFileId(nextId++);

@@ -33,6 +33,7 @@ internal class SubtreeSkippingTest : SubtreeSyncTest() {
         assertTrue(fixture.downloads.isEmpty())
         assertEquals(30, fixture.fileChecks.size)
         assertEquals(0, fixture.folderRowsWritten)
+        org.mockito.kotlin.verify(fixture.storage, org.mockito.kotlin.never()).getFileById(any())
     }
 
     @Test

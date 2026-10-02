@@ -39,6 +39,7 @@ import com.owncloud.android.utils.MimeTypeUtil;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -216,6 +217,15 @@ public class SynchronizeFolderOperation extends SyncOperation {
         if (!snapshot.getEtag().equals(remoteEtag)) {
             return fetchAndSyncRemoteFolder(client);
         }
+        Map<Long, OCFile> localFiles = new HashMap<>();
+        if (children.stream().anyMatch(child -> !child.isFolder())) {
+            for (OCFile localFile : getStorageManager().getFolderContent(mLocalFolder, false)) {
+                localFiles.put(localFile.getFileId(), localFile);
+            }
+            if (children.stream().anyMatch(child -> !child.isFolder() && !localFiles.containsKey(child.getFileId()))) {
+                return fetchAndSyncRemoteFolder(client);
+            }
+        }
         for (OCFile child : children) {
             if (mCancellationRequested.get()) {
                 throw new OperationCancelledException();
@@ -223,10 +233,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
             if (child.isFolder()) {
                 startSyncFolderOperation(child.getRemotePath());
             } else {
-                OCFile localFile = getStorageManager().getFileById(child.getFileId());
-                if (localFile == null) {
-                    return fetchAndSyncRemoteFolder(client);
-                }
+                OCFile localFile = localFiles.get(child.getFileId());
                 child.setEtag(child.getEtagOnServer());
                 prepareFileSync(child, localFile);
             }

@@ -47,7 +47,7 @@ class SyncFolderHandler extends Handler {
     private IndexedForest<SynchronizeFolderOperation> mPendingOperations = new IndexedForest<>();
 
     private Account mCurrentAccount;
-    private SynchronizeFolderOperation mCurrentSyncOperation;
+    private volatile SynchronizeFolderOperation mCurrentSyncOperation;
     private FileDownloadEventBroadcaster fileDownloadEventBroadcaster;
 
 
@@ -115,7 +115,7 @@ class SyncFolderHandler extends Handler {
                 mService.dispatchResultToOperationListeners(mCurrentSyncOperation, new RemoteOperationResult<>(e));
                 Log_OC.e(TAG, "Error while trying to get authorization", e);
             } finally {
-                mPendingOperations.removePayload(account.name, remotePath);
+                mPendingOperations.removePayload(account.name, remotePath, mCurrentSyncOperation);
             }
         }
     }
@@ -150,11 +150,10 @@ class SyncFolderHandler extends Handler {
         if (synchronization != null) {
             synchronization.cancel();
         } else {
-            // TODO synchronize?
-            if (mCurrentSyncOperation != null && mCurrentAccount != null &&
-                mCurrentSyncOperation.getRemotePath().startsWith(file.getRemotePath()) &&
-                    account.name.equals(mCurrentAccount.name)) {
-                mCurrentSyncOperation.cancel();
+            SynchronizeFolderOperation current = mCurrentSyncOperation;
+            if (current != null && current.getRemotePath().startsWith(file.getRemotePath()) &&
+                account.name.equals(current.getAccountName())) {
+                current.cancel();
             }
         }
     }

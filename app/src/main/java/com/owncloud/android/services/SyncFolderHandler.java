@@ -107,7 +107,7 @@ class SyncFolderHandler extends Handler {
                 OwnCloudClient mOwnCloudClient = OwnCloudClientManagerFactory.getDefaultSingleton().
                         getClientFor(ocAccount, mService);
 
-                result = mCurrentSyncOperation.execute(mOwnCloudClient);
+                result = executeQueuedOperation(mCurrentSyncOperation, mOwnCloudClient);
                 fileDownloadEventBroadcaster.sendDownloadCompleted(account.name, remotePath, mService.getPackageName(), result.isSuccess());
                 mService.dispatchResultToOperationListeners(mCurrentSyncOperation, result);
             } catch (AccountsException | IOException e) {
@@ -117,6 +117,15 @@ class SyncFolderHandler extends Handler {
             } finally {
                 mPendingOperations.removePayload(account.name, remotePath, mCurrentSyncOperation);
             }
+        }
+    }
+
+    static RemoteOperationResult executeQueuedOperation(SynchronizeFolderOperation operation, OwnCloudClient client) {
+        try {
+            return operation.execute(client);
+        } catch (RuntimeException e) {
+            Log_OC.e(TAG, "Queued folder synchronization failed", e);
+            return new RemoteOperationResult<>(e);
         }
     }
 

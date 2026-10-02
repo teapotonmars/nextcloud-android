@@ -15,8 +15,10 @@ import com.owncloud.android.datamodel.OCFile;
 import com.owncloud.android.lib.common.utils.Log_OC;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -30,8 +32,8 @@ public class IndexedForest<V> {
 
     private ConcurrentMap<String, Node<V>> mMap = new ConcurrentHashMap<>();
 
-    public ConcurrentMap<String, Node<V>> getAll() {
-        return mMap;
+    public Map<String, Node<V>> getAll() {
+        return Collections.unmodifiableMap(mMap);
     }
 
     @SuppressWarnings("PMD.ShortClassName")
@@ -39,7 +41,7 @@ public class IndexedForest<V> {
         private String mKey;
         private Node<V> mParent;
         private Set<Node<V>> mChildren = new HashSet<>();    // TODO be careful with hash()
-        private V mPayload;
+        private volatile V mPayload;
 
         // payload is optional
         public Node(String key, V payload) {
@@ -89,7 +91,8 @@ public class IndexedForest<V> {
     }
 
 
-    public /* synchronized */ Pair<String, String> putIfAbsent(String accountName, String remotePath, V value) {
+    // Parent links and child sets must change atomically with the index.
+    public synchronized Pair<String, String> putIfAbsent(String accountName, String remotePath, V value) {
         String targetKey = buildKey(accountName, remotePath);
 
         Node<V> valuedNode = new Node<>(targetKey, value);
@@ -138,7 +141,7 @@ public class IndexedForest<V> {
     }
 
 
-    public Pair<V, String> removePayload(String accountName, String remotePath) {
+    public synchronized Pair<V, String> removePayload(String accountName, String remotePath) {
         String targetKey = buildKey(accountName, remotePath);
         Node<V> target = mMap.get(targetKey);
         if (target != null) {
@@ -151,7 +154,7 @@ public class IndexedForest<V> {
     }
 
 
-    public /* synchronized */ Pair<V, String> remove(String accountName, String remotePath) {
+    public synchronized Pair<V, String> remove(String accountName, String remotePath) {
         String targetKey = buildKey(accountName, remotePath);
         Node<V> firstRemoved = mMap.remove(targetKey);
         String unlinkedFrom = null;
@@ -165,7 +168,7 @@ public class IndexedForest<V> {
             Node<V> parent = removed.getParent();
             while (parent != null) {
                 parent.removeChild(removed);
-                if (!parent.hasChildren()) {
+                if (!parent.hasChildren() && parent.getPayload() == null) {
                     removed = mMap.remove(parent.getKey());
                     parent = removed.getParent();
                 } else {
@@ -190,12 +193,12 @@ public class IndexedForest<V> {
         }
     }
 
-    public boolean contains(String accountName, String remotePath) {
+    public synchronized boolean contains(String accountName, String remotePath) {
         String targetKey = buildKey(accountName, remotePath);
         return mMap.containsKey(targetKey);
     }
 
-    public /* synchronized */ V get(String key) {
+    public synchronized V get(String key) {
         Node<V> node = mMap.get(key);
         if (node != null) {
             return node.getPayload();
@@ -214,7 +217,7 @@ public class IndexedForest<V> {
      * Remove the elements that contains account as a part of its key
      * @param accountName
      */
-    public void remove(String accountName){
+    public synchronized void remove(String accountName){
         mMap.keySet().removeIf(key -> key.startsWith(accountName));
     }
 

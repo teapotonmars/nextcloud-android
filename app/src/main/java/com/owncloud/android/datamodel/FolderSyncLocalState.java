@@ -19,8 +19,6 @@ public final class FolderSyncLocalState {
         remoteFolder.setLastSyncDateForProperties(localFolder.getLastSyncDateForProperties());
         // A parent listing can enrich these through the unified API when PROPFIND omits them.
         remoteFolder.setSharees(localFolder.getSharees());
-        remoteFolder.setInternalFolderSyncTimestamp(localFolder.getInternalFolderSyncTimestamp());
-        remoteFolder.setInternalFolderSyncResult(localFolder.getInternalFolderSyncResult());
         remoteFolder.setLastSyncDateForData(localFolder.getLastSyncDateForData());
         remoteFolder.setModificationTimestampAtLastSyncForData(localFolder.getModificationTimestampAtLastSyncForData());
         remoteFolder.setEncrypted(localFolder.isEncrypted());

@@ -461,8 +461,6 @@ public class SynchronizeFolderOperation extends SyncOperation {
         if (localFile != null) {
             updatedFile.setFileId(localFile.getFileId());
             updatedFile.setLastSyncDateForData(localFile.getLastSyncDateForData());
-            updatedFile.setInternalFolderSyncTimestamp(localFile.getInternalFolderSyncTimestamp());
-            updatedFile.setInternalFolderSyncResult(localFile.getInternalFolderSyncResult());
             updatedFile.setModificationTimestampAtLastSyncForData(
                     localFile.getModificationTimestampAtLastSyncForData()
             );

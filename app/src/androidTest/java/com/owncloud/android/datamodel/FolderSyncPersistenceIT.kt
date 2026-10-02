@@ -69,6 +69,55 @@ class FolderSyncPersistenceIT {
     }
 
     @Test
+    fun targetedFolderWritesNotifyContentObservers() {
+        root.internalFolderSyncTimestamp = 0
+        storage.saveFile(root)
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        for (write in listOf<() -> Unit>(
+            { storage.updateFolderSize(root) },
+            { storage.updateFolderSyncTime(root, 1234) },
+            { storage.updateInternalSyncResult(root, 1235, "OK") }
+        )) {
+            val changed = java.util.concurrent.CountDownLatch(1)
+            val observer = object : android.database.ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    changed.countDown()
+                }
+            }
+            resolver.registerContentObserver(ProviderTableMeta.CONTENT_URI, true, observer)
+            try {
+                write()
+                assertTrue(changed.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            } finally {
+                resolver.unregisterContentObserver(observer)
+            }
+        }
+    }
+
+    @Test
+    fun workerResultUpdateCannotOverwriteFreshListingMetadata() {
+        val stale = storage.getFileByPath("/")
+        root.apply {
+            internalFolderSyncTimestamp = 0
+            etagOnServer = "new-parent-token"
+            permissions = "new-permissions"
+            remoteId = "00000002test"
+        }
+        storage.saveFile(root)
+        storage.saveFolder(root, emptyList(), emptyList())
+        val before = readRow("/")
+        storage.updateInternalSyncResult(stale, 1234, "OK")
+        val after = readRow("/")
+        val expected = before.toMutableMap().apply {
+            put(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_TIMESTAMP, "1234")
+            put(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_RESULT, "OK")
+        }
+        assertEquals(expected, after)
+        storage.updateInternalSyncResult(stale, 1235, null)
+        assertEquals("OK", storage.getFileByPath("/").internalFolderSyncResult)
+    }
+
+    @Test
     fun staleListingsCannotOverwriteWorkerResultsOrEnrollmentChanges() {
         val child = directory("/child/")
         storage.saveFolder(root, listOf(child), emptyList())
@@ -88,6 +137,14 @@ class FolderSyncPersistenceIT {
                 val saved = storage.getFileByPath(path)
                 assertEquals(timestamp, saved.internalFolderSyncTimestamp)
                 assertEquals("new-result", saved.internalFolderSyncResult)
+            }
+            if (timestamp < 0) {
+                storage.updateInternalSyncResult(staleRoot, 9999, "late-result")
+                storage.updateInternalSyncResult(staleChild, 9999, "late-result")
+                assertEquals(-1L, storage.getFileByPath("/").internalFolderSyncTimestamp)
+                assertEquals(-1L, storage.getFileByPath("/child/").internalFolderSyncTimestamp)
+                assertEquals("new-result", storage.getFileByPath("/").internalFolderSyncResult)
+                assertEquals("new-result", storage.getFileByPath("/child/").internalFolderSyncResult)
             }
         }
     }

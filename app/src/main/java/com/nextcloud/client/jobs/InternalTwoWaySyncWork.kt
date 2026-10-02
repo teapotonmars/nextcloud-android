@@ -100,10 +100,7 @@ class InternalTwoWaySyncWork(
     }
 
     private fun saveSyncResult(storage: FileDataStorageManager, folder: OCFile, result: RemoteOperationResult<*>?) {
-        val savedFolder = storage.getFileByPath(folder.remotePath) ?: folder
-        result?.let { savedFolder.internalFolderSyncResult = it.code.toString() }
-        savedFolder.internalFolderSyncTimestamp = System.currentTimeMillis()
-        storage.saveFile(savedFolder)
+        storage.updateInternalSyncResult(folder, System.currentTimeMillis(), result?.code?.toString())
     }
 
     override fun onStopped() {

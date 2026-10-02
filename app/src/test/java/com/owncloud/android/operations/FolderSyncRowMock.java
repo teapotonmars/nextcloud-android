@@ -16,6 +16,15 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.spy;
 
 final class FolderSyncRowMock implements AutoCloseable {
+    static OCFile listingRow(OCFile listed, OCFile current) {
+        OCFile saved = listed;
+        if (current != null) {
+            saved.setInternalFolderSyncTimestamp(current.getInternalFolderSyncTimestamp());
+            saved.setInternalFolderSyncResult(current.getInternalFolderSyncResult());
+        }
+        return saved;
+    }
+
     FolderSyncRowMock(FileDataStorageManager storage, Map<String, OCFile> local) {
         doAnswer(call -> {
             call.callRealMethod();

@@ -162,13 +162,14 @@ final class FolderSyncFixture implements AutoCloseable {
                 if (file.getFileId() == -1) {
                     file.setFileId(nextId++);
                 }
-                local.put(file.getRemotePath(), file);
+                local.put(file.getRemotePath(), FolderSyncRowMock.listingRow(file, local.get(file.getRemotePath())));
             }
             OCFile saved = copy(folder);
             saved.setFileLength(0);
             saved.setFileId(folder.getFileId());
             saved.setStoragePath(local.get(folder.getRemotePath()).getStoragePath());
             saved.setEtagInConflict(local.get(folder.getRemotePath()).getEtagInConflict());
+            saved = FolderSyncRowMock.listingRow(saved, local.get(folder.getRemotePath()));
             local.put(folder.getRemotePath(), saved);
             return null;
         }).when(storage).saveFolder(any(), any(), any());

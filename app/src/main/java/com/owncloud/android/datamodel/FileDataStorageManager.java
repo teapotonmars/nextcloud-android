@@ -605,6 +605,11 @@ public class FileDataStorageManager {
         return result == null ? "" : result;
     }
 
+    public void updateInternalSyncResult(OCFile folder, long timestamp, String result) {
+        notifyFolderUpdate(folder, fileDao.updateInternalSyncResult(
+            user.getAccountName(), folder.getFileId(), timestamp, result));
+    }
+
     private void notifyFolderUpdate(OCFile folder, int updatedRows) {
         if (updatedRows == 0) {
             return;

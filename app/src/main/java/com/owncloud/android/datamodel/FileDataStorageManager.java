@@ -810,6 +810,7 @@ public class FileDataStorageManager {
                     fileId = getFileByPath(ocFile.getRemotePath()).getFileId();
                 }
                 // updating an existing file
+                omitInternalSyncState(contentValues);
                 operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
                                    .withValues(contentValues)
                                    .withSelection(ProviderTableMeta._ID + " = ?", new String[]{String.valueOf(fileId)})
@@ -855,6 +856,7 @@ public class FileDataStorageManager {
 
         // update metadata of folder
         ContentValues contentValues = createContentValuesForFolder(folder);
+        omitInternalSyncState(contentValues);
 
         operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
                            .withValues(contentValues)
@@ -896,6 +898,12 @@ public class FileDataStorageManager {
                 }
             }
         }
+    }
+
+    private static void omitInternalSyncState(ContentValues values) {
+        // Listings may have read the row before a worker or enrollment change committed.
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_TIMESTAMP);
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_RESULT);
     }
 
     /**

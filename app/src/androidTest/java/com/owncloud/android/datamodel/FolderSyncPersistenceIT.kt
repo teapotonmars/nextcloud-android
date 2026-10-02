@@ -69,6 +69,30 @@ class FolderSyncPersistenceIT {
     }
 
     @Test
+    fun staleListingsCannotOverwriteWorkerResultsOrEnrollmentChanges() {
+        val child = directory("/child/")
+        storage.saveFolder(root, listOf(child), emptyList())
+        val staleRoot = storage.getFileByPath("/")
+        val staleChild = storage.getFileByPath("/child/")
+        for (timestamp in listOf(1234L, -1L)) {
+            for (path in listOf("/", "/child/")) {
+                val current = storage.getFileByPath(path).apply {
+                    internalFolderSyncTimestamp = timestamp
+                    internalFolderSyncResult = "new-result"
+                }
+                storage.saveFile(current)
+            }
+            storage.saveFolder(staleRoot, listOf(staleChild), emptyList())
+            storage.saveFolder(staleChild, emptyList(), emptyList())
+            for (path in listOf("/", "/child/")) {
+                val saved = storage.getFileByPath(path)
+                assertEquals(timestamp, saved.internalFolderSyncTimestamp)
+                assertEquals("new-result", saved.internalFolderSyncResult)
+            }
+        }
+    }
+
+    @Test
     fun certificateUsesRealPersistedInventoryAndFollowsFolderLifecycle() {
         val child = directory("/child/").apply { etagOnServer = "child-token" }
         storage.saveFolder(root, listOf(child), emptyList())

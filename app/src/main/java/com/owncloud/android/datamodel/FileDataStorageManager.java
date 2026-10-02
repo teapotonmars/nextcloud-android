@@ -568,6 +568,60 @@ public class FileDataStorageManager {
         return mediaList;
     }
 
+    public String getFolderSyncSnapshot(String remotePath) {
+        OCFile folder = getFileByPath(remotePath);
+        if (folder == null || !FolderSyncSnapshot.supportsSkipping(folder, this)) {
+            return "";
+        }
+        return fileDao.getFolderSyncSnapshot(user.getAccountName(), folder.getFileId());
+    }
+
+    public void saveFolderSyncSnapshot(String remotePath, String snapshot) {
+        OCFile folder = getFileByPath(remotePath);
+        if (folder == null || !FolderSyncSnapshot.supportsSkipping(folder, this)) {
+            return;
+        }
+        fileDao.setFolderSyncSnapshot(user.getAccountName(), folder.getFileId(), snapshot);
+    }
+
+    public void updateFolderSize(OCFile folder) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSize(
+            user.getAccountName(), folder.getFileId(), folder.getFileLength()));
+    }
+
+    public void saveSynchronizedFolder(OCFile remoteFolder, OCFile localFolder,
+                                       List<OCFile> children, Collection<OCFile> removed) {
+        FolderSyncLocalState.preserve(remoteFolder, localFolder);
+        saveFolder(remoteFolder, children, removed);
+        updateFolderSize(remoteFolder);
+    }
+
+    public void updateFolderSyncTime(OCFile folder, long timestamp) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSyncTime(user.getAccountName(), folder.getFileId(), timestamp));
+        folder.setLastSyncDateForData(timestamp);
+    }
+
+    private static String internalSyncResultOrEmpty(String result) {
+        return result == null ? "" : result;
+    }
+
+    public void updateInternalSyncResult(OCFile folder, long timestamp, String result) {
+        notifyFolderUpdate(folder, fileDao.updateInternalSyncResult(
+            user.getAccountName(), folder.getFileId(), timestamp, result));
+    }
+
+    private void notifyFolderUpdate(OCFile folder, int updatedRows) {
+        if (updatedRows == 0) {
+            return;
+        }
+        ContentResolver resolver = getContentResolver();
+        if (resolver == null) {
+            resolver = MainApp.getAppContext().getContentResolver();
+        }
+        resolver.notifyChange(ProviderTableMeta.CONTENT_URI, null);
+        resolver.notifyChange(ContentUris.withAppendedId(ProviderTableMeta.CONTENT_URI_DIR, folder.getParentId()), null);
+    }
+
     public boolean saveFile(OCFile ocFile) {
         Log_OC.d(TAG, "saving file " + ocFile.getFileName() + " into " + ocFile.getRemotePath());
 
@@ -761,6 +815,7 @@ public class FileDataStorageManager {
                     fileId = getFileByPath(ocFile.getRemotePath()).getFileId();
                 }
                 // updating an existing file
+                omitInternalSyncState(contentValues);
                 operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
                                    .withValues(contentValues)
                                    .withSelection(ProviderTableMeta._ID + " = ?", new String[]{String.valueOf(fileId)})
@@ -806,6 +861,7 @@ public class FileDataStorageManager {
 
         // update metadata of folder
         ContentValues contentValues = createContentValuesForFolder(folder);
+        omitInternalSyncState(contentValues);
 
         operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
                            .withValues(contentValues)
@@ -847,6 +903,12 @@ public class FileDataStorageManager {
                 }
             }
         }
+    }
+
+    private static void omitInternalSyncState(ContentValues values) {
+        // Listings may have read the row before a worker or enrollment change committed.
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_TIMESTAMP);
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_RESULT);
     }
 
     /**
@@ -1351,6 +1413,7 @@ public class FileDataStorageManager {
         ocFile.setHidden(nullToZero(fileEntity.getHidden()) == 1);
         ocFile.setE2eCounter(fileEntity.getE2eCounter());
         ocFile.setInternalFolderSyncTimestamp(nullToMinusOne(fileEntity.getInternalTwoWaySync()));
+        ocFile.setInternalFolderSyncResult(internalSyncResultOrEmpty(fileEntity.getInternalTwoWaySyncResult()));
 
         String sharees = fileEntity.getSharees();
         // Surprisingly JSON deserialization causes significant overhead.
@@ -2088,21 +2151,28 @@ public class FileDataStorageManager {
             cv.put(ProviderTableMeta.FILE_ETAG_IN_CONFLICT, etagInConflict);
         }
 
+        String selection = ProviderTableMeta._ID + "=? AND " + ProviderTableMeta.FILE_ACCOUNT_OWNER + "=?";
+        String[] selectionArgs = {String.valueOf(ocFile.getFileId()), user.getAccountName()};
+        if (etagInConflict == null || !ocFile.isDown()) {
+            // Only a cleared persisted conflict requires recalculating ancestor conflict markers.
+            selection += " AND " + ProviderTableMeta.FILE_ETAG_IN_CONFLICT + " IS NOT NULL";
+        }
+
         int updated = 0;
         if (getContentResolver() != null) {
             updated = getContentResolver().update(
                 ProviderTableMeta.CONTENT_URI_FILE,
                 cv,
-                ProviderTableMeta._ID + "=?",
-                new String[]{String.valueOf(ocFile.getFileId())}
+                selection,
+                selectionArgs
                                                  );
         } else {
             try {
                 updated = getContentProviderClient().update(
                     ProviderTableMeta.CONTENT_URI_FILE,
                     cv,
-                    ProviderTableMeta._ID + "=?",
-                    new String[]{String.valueOf(ocFile.getFileId())}
+                    selection,
+                    selectionArgs
                                                            );
             } catch (RemoteException e) {
                 Log_OC.e(TAG, "Failed saving conflict in database " + e.getMessage(), e);
@@ -2229,6 +2299,36 @@ public class FileDataStorageManager {
                     Log_OC.d(TAG, "checking parents to remove conflict; NEXT " + parentPath);
                 }
             }
+        }
+    }
+
+    public void clearFolderConflictIfResolved(OCFile folder) {
+        String selection = ProviderTableMeta.FILE_ACCOUNT_OWNER + "=? AND " +
+            ProviderTableMeta.FILE_PATH + " >= ? AND " + ProviderTableMeta.FILE_PATH + " < ? AND " +
+            ProviderTableMeta.FILE_CONTENT_TYPE + " NOT IN (?, ?) AND " +
+            ProviderTableMeta.FILE_ETAG_IN_CONFLICT + " IS NOT NULL";
+        String path = folder.getRemotePath();
+        String upperBound = path.substring(0, path.length() - 1) + "0";
+        String[] arguments = {user.getAccountName(), path, upperBound, MimeType.DIRECTORY, MimeType.WEBDAV_FOLDER};
+        try (Cursor conflicts = getContentResolver() != null
+            ? getContentResolver().query(ProviderTableMeta.CONTENT_URI_FILE,
+                                        new String[]{ProviderTableMeta._ID}, selection, arguments, null)
+            : getContentProviderClient().query(ProviderTableMeta.CONTENT_URI_FILE,
+                                              new String[]{ProviderTableMeta._ID}, selection, arguments, null)) {
+            if (conflicts == null || conflicts.getCount() != 0) {
+                return;
+            }
+            ContentValues values = new ContentValues();
+            values.putNull(ProviderTableMeta.FILE_ETAG_IN_CONFLICT);
+            String where = ProviderTableMeta._ID + "=? AND " + ProviderTableMeta.FILE_ACCOUNT_OWNER + "=?";
+            String[] whereArgs = {String.valueOf(folder.getFileId()), user.getAccountName()};
+            if (getContentResolver() != null) {
+                getContentResolver().update(ProviderTableMeta.CONTENT_URI_FILE, values, where, whereArgs);
+            } else {
+                getContentProviderClient().update(ProviderTableMeta.CONTENT_URI_FILE, values, where, whereArgs);
+            }
+        } catch (RemoteException e) {
+            Log_OC.e(TAG, "Failed reconciling folder conflict " + e.getMessage(), e);
         }
     }
 

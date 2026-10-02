@@ -10,6 +10,7 @@ package com.nextcloud.client.jobs
 import android.content.Context
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.nextcloud.client.account.User
 import com.nextcloud.client.account.UserAccountManager
 import com.nextcloud.client.device.PowerManagementService
 import com.nextcloud.client.network.ConnectivityService
@@ -17,6 +18,7 @@ import com.nextcloud.client.preferences.AppPreferences
 import com.owncloud.android.MainApp
 import com.owncloud.android.datamodel.FileDataStorageManager
 import com.owncloud.android.datamodel.OCFile
+import com.owncloud.android.lib.common.operations.RemoteOperationResult
 import com.owncloud.android.lib.common.utils.Log_OC
 import com.owncloud.android.operations.SynchronizeFolderOperation
 import com.owncloud.android.utils.FileStorageUtils
@@ -67,16 +69,7 @@ class InternalTwoWaySyncWork(
                 }
 
                 Log_OC.d(TAG, "Folder ${folder.remotePath}: started!")
-                operation =
-                    SynchronizeFolderOperation(
-                        context,
-                        folder.remotePath,
-                        user,
-                        fileDataStorageManager,
-                        false,
-                        false
-                    )
-                val operationResult = operation?.execute(context)
+                val operationResult = synchronizeFolder(user, folder, fileDataStorageManager)
 
                 if (operationResult?.isSuccess == true) {
                     Log_OC.d(TAG, "Folder ${folder.remotePath}: finished!")
@@ -85,15 +78,7 @@ class InternalTwoWaySyncWork(
                     result = false
                 }
 
-                folder.apply {
-                    operationResult?.let {
-                        internalFolderSyncResult = it.code.toString()
-                    }
-
-                    internalFolderSyncTimestamp = System.currentTimeMillis()
-                }
-
-                fileDataStorageManager.saveFile(folder)
+                saveSyncResult(fileDataStorageManager, folder, operationResult)
             }
         }
 
@@ -104,6 +89,31 @@ class InternalTwoWaySyncWork(
             Log_OC.d(TAG, "Worker finished with failure!")
             Result.failure()
         }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun synchronizeFolder(
+        user: User,
+        folder: OCFile,
+        storage: FileDataStorageManager
+    ): RemoteOperationResult<*>? = try {
+        operation = SynchronizeFolderOperation(
+            context,
+            folder.remotePath,
+            user,
+            storage,
+            false,
+            // Metadata refreshes can cache ancestor ETags before descendants have been synchronized.
+            true
+        )
+        operation?.execute(context)
+    } catch (exception: RuntimeException) {
+        Log_OC.e(TAG, "Folder ${folder.remotePath}: synchronization threw an exception", exception)
+        RemoteOperationResult<Any>(exception)
+    }
+
+    private fun saveSyncResult(storage: FileDataStorageManager, folder: OCFile, result: RemoteOperationResult<*>?) {
+        storage.updateInternalSyncResult(folder, System.currentTimeMillis(), result?.code?.toString())
     }
 
     override fun onStopped() {

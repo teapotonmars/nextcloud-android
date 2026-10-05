@@ -298,6 +298,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
 
         // loop to synchronize every child
         List<OCFile> updatedFiles = new ArrayList<>(folderAndFiles.size() - 1);
+        List<OCFile> foldersToSync = new ArrayList<>();
         OCFile remoteFile;
         OCFile localFile;
         OCFile updatedFile;
@@ -337,7 +338,11 @@ public class SynchronizeFolderOperation extends SyncOperation {
             boolean encrypted = updatedFile.isEncrypted() || mLocalFolder.isEncrypted();
             updatedFile.setEncrypted(encrypted);
 
-            syncFileOrFolder(remoteFile, localFile);
+            if (remoteFile.isFolder()) {
+                foldersToSync.add(remoteFile);
+            } else {
+                syncFileOrFolder(remoteFile, localFile);
+            }
 
             updatedFiles.add(updatedFile);
         }
@@ -354,6 +359,10 @@ public class SynchronizeFolderOperation extends SyncOperation {
 
         storageManager.saveSynchronizedFolder(remoteFolder, mLocalFolder, updatedFiles, localFilesMap.values());
         storageManager.updateFolderSyncTime(mLocalFolder, System.currentTimeMillis());
+        // Queued operations can start immediately and require the committed child metadata.
+        for (OCFile folder : foldersToSync) {
+            syncFileOrFolder(folder, null);
+        }
     }
 
     private void updateLocalStateData(OCFile remoteFile, OCFile localFile, OCFile updatedFile) {

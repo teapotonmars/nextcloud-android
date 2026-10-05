@@ -568,6 +568,27 @@ public class FileDataStorageManager {
         return mediaList;
     }
 
+    private static String internalSyncResultOrEmpty(String result) {
+        return result == null ? "" : result;
+    }
+
+    public void updateInternalSyncResult(OCFile folder, long timestamp, String result) {
+        notifyFolderUpdate(folder, fileDao.updateInternalSyncResult(
+            user.getAccountName(), folder.getFileId(), timestamp, result));
+    }
+
+    private void notifyFolderUpdate(OCFile folder, int updatedRows) {
+        if (updatedRows == 0) {
+            return;
+        }
+        ContentResolver resolver = getContentResolver();
+        if (resolver == null) {
+            resolver = MainApp.getAppContext().getContentResolver();
+        }
+        resolver.notifyChange(ProviderTableMeta.CONTENT_URI, null);
+        resolver.notifyChange(ContentUris.withAppendedId(ProviderTableMeta.CONTENT_URI_DIR, folder.getParentId()), null);
+    }
+
     public boolean saveFile(OCFile ocFile) {
         Log_OC.d(TAG, "saving file " + ocFile.getFileName() + " into " + ocFile.getRemotePath());
 
@@ -761,6 +782,7 @@ public class FileDataStorageManager {
                     fileId = getFileByPath(ocFile.getRemotePath()).getFileId();
                 }
                 // updating an existing file
+                omitInternalSyncState(contentValues);
                 operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
                                    .withValues(contentValues)
                                    .withSelection(ProviderTableMeta._ID + " = ?", new String[]{String.valueOf(fileId)})
@@ -806,6 +828,7 @@ public class FileDataStorageManager {
 
         // update metadata of folder
         ContentValues contentValues = createContentValuesForFolder(folder);
+        omitInternalSyncState(contentValues);
 
         operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
                            .withValues(contentValues)
@@ -847,6 +870,12 @@ public class FileDataStorageManager {
                 }
             }
         }
+    }
+
+    private static void omitInternalSyncState(ContentValues values) {
+        // Listings may have read the row before a worker or enrollment change committed.
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_TIMESTAMP);
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_RESULT);
     }
 
     /**
@@ -1351,6 +1380,7 @@ public class FileDataStorageManager {
         ocFile.setHidden(nullToZero(fileEntity.getHidden()) == 1);
         ocFile.setE2eCounter(fileEntity.getE2eCounter());
         ocFile.setInternalFolderSyncTimestamp(nullToMinusOne(fileEntity.getInternalTwoWaySync()));
+        ocFile.setInternalFolderSyncResult(internalSyncResultOrEmpty(fileEntity.getInternalTwoWaySyncResult()));
 
         String sharees = fileEntity.getSharees();
         // Surprisingly JSON deserialization causes significant overhead.

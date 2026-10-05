@@ -17,6 +17,7 @@ import com.nextcloud.client.preferences.AppPreferences
 import com.owncloud.android.MainApp
 import com.owncloud.android.datamodel.FileDataStorageManager
 import com.owncloud.android.datamodel.OCFile
+import com.owncloud.android.lib.common.operations.RemoteOperationResult
 import com.owncloud.android.lib.common.utils.Log_OC
 import com.owncloud.android.operations.SynchronizeFolderOperation
 import com.owncloud.android.utils.FileStorageUtils
@@ -85,15 +86,7 @@ class InternalTwoWaySyncWork(
                     result = false
                 }
 
-                folder.apply {
-                    operationResult?.let {
-                        internalFolderSyncResult = it.code.toString()
-                    }
-
-                    internalFolderSyncTimestamp = System.currentTimeMillis()
-                }
-
-                fileDataStorageManager.saveFile(folder)
+                saveSyncResult(fileDataStorageManager, folder, operationResult)
             }
         }
 
@@ -104,6 +97,10 @@ class InternalTwoWaySyncWork(
             Log_OC.d(TAG, "Worker finished with failure!")
             Result.failure()
         }
+    }
+
+    private fun saveSyncResult(storage: FileDataStorageManager, folder: OCFile, result: RemoteOperationResult<*>?) {
+        storage.updateInternalSyncResult(folder, System.currentTimeMillis(), result?.code?.toString())
     }
 
     override fun onStopped() {

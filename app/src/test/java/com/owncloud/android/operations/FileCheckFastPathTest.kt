@@ -33,10 +33,11 @@ class FileCheckFastPathTest {
     }
 
     @Test
-    fun unchangedFilesHaveNoConflictWrites() {
+    fun unchangedFilesHaveNoConflictWritesOrProgressNotifications() {
         fixture.syncTree()
         assertEquals(30, fixture.fileChecks.size)
         assertEquals(0, fixture.downloads.size)
+        assertEquals(0, fixture.notificationUpdates)
         Mockito.verify(fixture.storage, Mockito.never()).saveConflict(
             ArgumentMatchers.any(),
             ArgumentMatchers.isNull()
@@ -50,5 +51,6 @@ class FileCheckFastPathTest {
         fixture.syncTree()
         Mockito.verify(fixture.storage).saveConflict(file, null)
         assertEquals(0, fixture.downloads.size)
+        assertEquals(0, fixture.notificationUpdates)
     }
 }

@@ -112,6 +112,7 @@ public class SyncAllFolderOperationTest {
         assertEquals(List.of(modified), fixture.downloads);
         assertEquals("new-content", fixture.local.get(modified).getEtag());
         assertFalse(fixture.local.containsKey(deleted));
+        assertEquals(1, fixture.notificationUpdates);
     }
 
     @Test
@@ -277,6 +278,7 @@ public class SyncAllFolderOperationTest {
         fixture.syncTree();
         printCounts("unchanged");
         assertTrue(fixture.downloads.isEmpty());
+        assertEquals(0, fixture.notificationUpdates);
         verify(fixture.storage, org.mockito.Mockito.never()).saveConflict(
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull());
         fixture.resetCounts();
@@ -285,6 +287,7 @@ public class SyncAllFolderOperationTest {
         fixture.syncTree();
         printCounts("deep addition");
         assertEquals(List.of(added), fixture.downloads);
+        assertEquals(1, fixture.notificationUpdates);
     }
 
     private void printCounts(String scenario) {

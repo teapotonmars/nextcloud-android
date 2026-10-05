@@ -17,6 +17,20 @@ import com.owncloud.android.utils.MimeType
 @Suppress("TooManyFunctions")
 @Dao
 interface FileDao {
+    @Query(
+        "UPDATE filelist SET internal_two_way_sync_timestamp = :timestamp, " +
+            "internal_two_way_sync_result = COALESCE(:result, internal_two_way_sync_result) " +
+            "WHERE _id = :id AND file_owner = :fileOwner AND internal_two_way_sync_timestamp >= 0"
+    )
+    fun updateInternalSyncResult(fileOwner: String, id: Long, timestamp: Long, result: String?): Int
+
+    @Query(
+        "UPDATE filelist SET internal_two_way_sync_timestamp = :timestamp " +
+            "WHERE _id = :id AND file_owner = :fileOwner AND path = :path"
+    )
+    fun updateInternalSyncEnrollment(fileOwner: String, id: Long, path: String, timestamp: Long): Int
+
+
     @Update
     fun update(entity: FileEntity)
 

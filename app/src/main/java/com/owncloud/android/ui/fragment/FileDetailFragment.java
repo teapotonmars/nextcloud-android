@@ -548,13 +548,7 @@ public class FileDetailFragment extends FileFragment implements OnClickListener,
             preferences.setShowDetailedTimestampEnabled(showDetailedTimestamp);
             setFileModificationTimestamp(getFile(), showDetailedTimestamp);
         } else if (id == R.id.folder_sync_button) {
-            if (binding.folderSyncButton.isChecked()) {
-                getFile().setInternalFolderSyncTimestamp(0L);
-            } else {
-                getFile().setInternalFolderSyncTimestamp(-1L);
-            }
-
-            storageManager.saveFile(getFile());
+            storageManager.updateInternalSyncEnrollment(getFile(), binding.folderSyncButton.isChecked());
         } else {
             Log_OC.e(TAG, "Incorrect view clicked!");
         }

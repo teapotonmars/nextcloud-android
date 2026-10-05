@@ -352,9 +352,8 @@ public class SynchronizeFolderOperation extends SyncOperation {
         // save updated contents in local database
         UnifiedShareSharees.fillBlocking(user, updatedFiles);
 
-        storageManager.saveFolder(remoteFolder, updatedFiles, localFilesMap.values());
-        mLocalFolder.setLastSyncDateForData(System.currentTimeMillis());
-        storageManager.saveFile(mLocalFolder);
+        storageManager.saveSynchronizedFolder(remoteFolder, mLocalFolder, updatedFiles, localFilesMap.values());
+        storageManager.updateFolderSyncTime(mLocalFolder, System.currentTimeMillis());
     }
 
     private void updateLocalStateData(OCFile remoteFile, OCFile localFile, OCFile updatedFile) {
@@ -469,8 +468,6 @@ public class SynchronizeFolderOperation extends SyncOperation {
             String eTag = remoteFile.getEtag();
             mLocalFolder.setEtag(eTag);
 
-            final FileDataStorageManager storageManager = getStorageManager();
-            storageManager.saveFile(mLocalFolder);
         }
     }
 

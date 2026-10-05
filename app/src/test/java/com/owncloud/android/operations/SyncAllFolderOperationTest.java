@@ -271,11 +271,14 @@ public class SyncAllFolderOperationTest {
     public void requestCountsForControlledHierarchy() {
         fixture.syncTree();
         printCounts("initial");
+        org.mockito.Mockito.clearInvocations(fixture.storage);
         assertEquals(30, fixture.downloads.size());
         fixture.resetCounts();
         fixture.syncTree();
         printCounts("unchanged");
         assertTrue(fixture.downloads.isEmpty());
+        verify(fixture.storage, org.mockito.Mockito.never()).saveConflict(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull());
         fixture.resetCounts();
         String added = ROOT + "a/deep/new";
         fixture.addRemote(added, false);

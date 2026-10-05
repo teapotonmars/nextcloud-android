@@ -2152,7 +2152,6 @@ public class FileDataStorageManager {
         }
     }
 
-    @SuppressFBWarnings("PSC")
     public void saveConflict(OCFile ocFile, String etagInConflict) {
         ContentValues cv = new ContentValues();
         if (!ocFile.isDown()) {
@@ -2161,21 +2160,28 @@ public class FileDataStorageManager {
             cv.put(ProviderTableMeta.FILE_ETAG_IN_CONFLICT, etagInConflict);
         }
 
+        String selection = ProviderTableMeta._ID + "=? AND " + ProviderTableMeta.FILE_ACCOUNT_OWNER + "=?";
+        String[] selectionArgs = {String.valueOf(ocFile.getFileId()), user.getAccountName()};
+        if (etagInConflict == null || !ocFile.isDown()) {
+            // Only a cleared persisted conflict requires recalculating ancestor conflict markers.
+            selection += " AND " + ProviderTableMeta.FILE_ETAG_IN_CONFLICT + " IS NOT NULL";
+        }
+
         int updated = 0;
         if (getContentResolver() != null) {
             updated = getContentResolver().update(
                 ProviderTableMeta.CONTENT_URI_FILE,
                 cv,
-                ProviderTableMeta._ID + "=?",
-                new String[]{String.valueOf(ocFile.getFileId())}
+                selection,
+                selectionArgs
                                                  );
         } else {
             try {
                 updated = getContentProviderClient().update(
                     ProviderTableMeta.CONTENT_URI_FILE,
                     cv,
-                    ProviderTableMeta._ID + "=?",
-                    new String[]{String.valueOf(ocFile.getFileId())}
+                    selection,
+                    selectionArgs
                                                            );
             } catch (RemoteException e) {
                 Log_OC.e(TAG, "Failed saving conflict in database " + e.getMessage(), e);
@@ -2191,8 +2197,11 @@ public class FileDataStorageManager {
                 long parentId = ocFile.getParentId();
                 Set<String> ancestorIds = new HashSet<>();
                 while (parentId != FileDataStorageManager.ROOT_PARENT_ID) {
-                    ancestorIds.add(Long.toString(parentId));
-                    parentId = getFileById(parentId).getParentId();
+                    OCFile parent = getFileById(parentId);
+                    if (parent == null || !ancestorIds.add(Long.toString(parentId))) {
+                        break;
+                    }
+                    parentId = parent.getParentId();
                 }
 
                 if (ancestorIds.size() > 0) {
@@ -2202,14 +2211,16 @@ public class FileDataStorageManager {
                     for (int i = 0; i < ancestorIds.size() - 1; i++) {
                         stringBuilder.append("?, ");
                     }
-                    stringBuilder.append("?)");
+                    stringBuilder.append("?) AND " + ProviderTableMeta.FILE_ACCOUNT_OWNER + "=?");
+                    List<String> ancestorArguments = new ArrayList<>(ancestorIds);
+                    ancestorArguments.add(user.getAccountName());
 
                     if (getContentResolver() != null) {
                         getContentResolver().update(
                             ProviderTableMeta.CONTENT_URI_FILE,
                             cv,
                             stringBuilder.toString(),
-                            ancestorIds.toArray(new String[]{})
+                            ancestorArguments.toArray(new String[]{})
                                                              );
                     } else {
                         try {
@@ -2217,7 +2228,7 @@ public class FileDataStorageManager {
                                 ProviderTableMeta.CONTENT_URI_FILE,
                                 cv,
                                 stringBuilder.toString(),
-                                ancestorIds.toArray(new String[]{})
+                                ancestorArguments.toArray(new String[]{})
                                                                        );
                         } catch (RemoteException e) {
                             Log_OC.e(TAG, "Failed saving conflict in database " + e.getMessage(), e);
@@ -2232,76 +2243,37 @@ public class FileDataStorageManager {
                 if (parentPath.endsWith(OCFile.PATH_SEPARATOR)) {
                     parentPath = parentPath.substring(0, parentPath.length() - 1);
                 }
-                parentPath = parentPath.substring(0, parentPath.lastIndexOf(OCFile.PATH_SEPARATOR) + 1);
+                parentPath = parentPath.substring(0, parentPath.lastIndexOf('/') + 1);
 
                 Log_OC.d(TAG, "checking parents to remove conflict; STARTING with " + parentPath);
                 while (parentPath.length() > 0) {
-                    String[] projection = {ProviderTableMeta._ID};
-                    String whereForDescencentsInConflict =
-                        ProviderTableMeta.FILE_ETAG_IN_CONFLICT + " IS NOT NULL AND " +
-                            ProviderTableMeta.FILE_CONTENT_TYPE + " != 'DIR' AND " +
-                            ProviderTableMeta.FILE_ACCOUNT_OWNER + AND +
-                            ProviderTableMeta.FILE_PATH + " LIKE ?";
-                    Cursor descendentsInConflict = null;
-                    if (getContentResolver() != null) {
-                        descendentsInConflict = getContentResolver().query(
-                            ProviderTableMeta.CONTENT_URI_FILE,
-                            projection,
-                            whereForDescencentsInConflict,
-                            new String[]{user.getAccountName(), parentPath + '%'},
-                            null
-                                                                          );
-                    } else {
-                        try {
-                            descendentsInConflict = getContentProviderClient().query(
-                                ProviderTableMeta.CONTENT_URI_FILE,
-                                projection,
-                                whereForDescencentsInConflict,
-                                new String[]{user.getAccountName(), parentPath + "%"},
-                                null
-                                                                                    );
-                        } catch (RemoteException e) {
-                            Log_OC.e(TAG, "Failed querying for descendents in conflict " + e.getMessage(), e);
-                        }
-                    }
-
-                    if (descendentsInConflict == null || descendentsInConflict.getCount() == 0) {
-                        Log_OC.d(TAG, "NO MORE conflicts in " + parentPath);
-                        if (getContentResolver() != null) {
-                            getContentResolver().update(
-                                ProviderTableMeta.CONTENT_URI_FILE,
-                                cv,
-                                ProviderTableMeta.FILE_ACCOUNT_OWNER + AND +
-                                    ProviderTableMeta.FILE_PATH + "=?",
-                                new String[]{user.getAccountName(), parentPath}
-                                                                 );
-                        } else {
-                            try {
-                                getContentProviderClient().update(
-                                    ProviderTableMeta.CONTENT_URI_FILE,
-                                    cv,
-                                    ProviderTableMeta.FILE_ACCOUNT_OWNER + AND +
-                                        ProviderTableMeta.FILE_PATH + "=?"
-                                    , new String[]{user.getAccountName(), parentPath}
-                                                                           );
-                            } catch (RemoteException e) {
-                                Log_OC.e(TAG, "Failed saving conflict in database " + e.getMessage(), e);
-                            }
-                        }
-
-                    } else {
-                        Log_OC.d(TAG, "STILL " + descendentsInConflict.getCount() + " in " + parentPath);
-                    }
-
-                    if (descendentsInConflict != null) {
-                        descendentsInConflict.close();
-                    }
+                    clearFolderConflictIfResolved(parentPath);
 
                     parentPath = parentPath.substring(0, parentPath.length() - 1);  // trim last /
-                    parentPath = parentPath.substring(0, parentPath.lastIndexOf(OCFile.PATH_SEPARATOR) + 1);
+                    parentPath = parentPath.substring(0, parentPath.lastIndexOf('/') + 1);
                     Log_OC.d(TAG, "checking parents to remove conflict; NEXT " + parentPath);
                 }
             }
+        }
+    }
+
+    public void clearFolderConflictIfResolved(OCFile folder) {
+        String path = folder.getRemotePath();
+        // Binary collation places '0' after '/', bounding a literal subtree without LIKE wildcards.
+        String upperBound = path.substring(0, path.length() - 1) + "0";
+        try {
+            // The conflict check and marker update must observe the same committed database state.
+            notifyFolderUpdate(folder, fileDao.clearFolderConflictIfResolved(
+                user.getAccountName(), folder.getFileId(), path, upperBound, MimeType.DIRECTORY, MimeType.WEBDAV_FOLDER));
+        } catch (RuntimeException e) {
+            Log_OC.e(TAG, "Failed reconciling folder conflict " + e.getMessage(), e);
+        }
+    }
+
+    private void clearFolderConflictIfResolved(String path) {
+        OCFile folder = getFileByPath(path);
+        if (folder != null) {
+            clearFolderConflictIfResolved(folder);
         }
     }
 

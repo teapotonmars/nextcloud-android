@@ -156,6 +156,10 @@ public class SynchronizeFolderOperation extends SyncOperation {
 
             if (result.isSuccess()) {
                 syncContents();
+                if (mLocalFolder.isInConflict()) {
+                    // A prior interrupted conflict cleanup may have left only the folder marker.
+                    getStorageManager().clearFolderConflictIfResolved(mLocalFolder);
+                }
             }
 
             if (mCancellationRequested.get()) {

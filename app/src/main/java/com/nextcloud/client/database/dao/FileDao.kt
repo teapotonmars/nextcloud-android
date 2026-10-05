@@ -18,6 +18,23 @@ import com.owncloud.android.utils.MimeType
 @Dao
 interface FileDao {
     @Query(
+        "UPDATE filelist SET etag_in_conflict = NULL " +
+            "WHERE _id = :id AND file_owner = :fileOwner AND path = :path AND etag_in_conflict IS NOT NULL " +
+            "AND NOT EXISTS (SELECT 1 FROM filelist WHERE file_owner = :fileOwner " +
+            "AND path >= :path AND path < :upperBound " +
+            "AND (content_type IS NULL OR content_type NOT IN (:directoryMime, :webdavMime)) " +
+            "AND etag_in_conflict IS NOT NULL)"
+    )
+    fun clearFolderConflictIfResolved(
+        fileOwner: String,
+        id: Long,
+        path: String,
+        upperBound: String,
+        directoryMime: String,
+        webdavMime: String
+    ): Int
+
+    @Query(
         "UPDATE filelist SET internal_two_way_sync_timestamp = :timestamp, " +
             "internal_two_way_sync_result = COALESCE(:result, internal_two_way_sync_result) " +
             "WHERE _id = :id AND file_owner = :fileOwner AND internal_two_way_sync_timestamp >= 0"

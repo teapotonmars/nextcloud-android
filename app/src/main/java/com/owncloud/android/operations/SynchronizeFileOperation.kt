@@ -165,7 +165,8 @@ class SynchronizeFileOperation : SyncOperation {
             else -> RemoteOperationResult<Any?>(RemoteOperationResult.ResultCode.OK)
         }
 
-        if (result.code != RemoteOperationResult.ResultCode.SYNC_CONFLICT) {
+        val conflictNeedsClearing = serverChanged || localChanged || localFile?.isInConflict == true
+        if (result.code != RemoteOperationResult.ResultCode.SYNC_CONFLICT && conflictNeedsClearing) {
             storageManager.saveConflict(localFile, null)
         }
 

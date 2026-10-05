@@ -568,6 +568,32 @@ public class FileDataStorageManager {
         return mediaList;
     }
 
+    public void updateFolderSize(OCFile folder) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSize(
+            user.getAccountName(), folder.getFileId(), folder.getFileLength()));
+    }
+
+    public void saveSynchronizedFolder(OCFile remoteFolder, OCFile localFolder,
+                                       List<OCFile> children, Collection<OCFile> removed) {
+        FolderSyncLocalState.preserve(remoteFolder, localFolder);
+        remoteFolder.setEtagOnServer(remoteFolder.getEtag());
+        ContentValues values = createContentValuesForFolder(remoteFolder);
+        values.remove(ProviderTableMeta.FILE_PATH_DECRYPTED);
+        values.remove(ProviderTableMeta.FILE_IS_READ_ONLY);
+        values.remove(ProviderTableMeta.FILE_LAST_SYNC_DATE);
+        values.remove(ProviderTableMeta.FILE_SHAREES);
+        values.remove(ProviderTableMeta.FILE_LAST_SYNC_DATE_FOR_DATA);
+        values.remove(ProviderTableMeta.FILE_MODIFIED_AT_LAST_SYNC_FOR_DATA);
+        values.remove(ProviderTableMeta.FILE_IS_ENCRYPTED);
+        saveFolder(remoteFolder, children, removed, values);
+        updateFolderSize(remoteFolder);
+    }
+
+    public void updateFolderSyncTime(OCFile folder, long timestamp) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSyncTime(user.getAccountName(), folder.getFileId(), timestamp));
+        folder.setLastSyncDateForData(timestamp);
+    }
+
     private static String internalSyncResultOrEmpty(String result) {
         return result == null ? "" : result;
     }
@@ -777,6 +803,11 @@ public class FileDataStorageManager {
      * @param filesToRemove
      */
     public void saveFolder(OCFile folder, List<OCFile> updatedFiles, Collection<OCFile> filesToRemove) {
+        saveFolder(folder, updatedFiles, filesToRemove, createContentValuesForFolder(folder));
+    }
+
+    private void saveFolder(OCFile folder, List<OCFile> updatedFiles, Collection<OCFile> filesToRemove,
+                            ContentValues folderValues) {
         Log_OC.d(TAG, "Saving folder " + folder.getRemotePath() + " with " + updatedFiles.size()
             + " children and " + filesToRemove.size() + " files to remove");
 
@@ -840,11 +871,10 @@ public class FileDataStorageManager {
         }
 
         // update metadata of folder
-        ContentValues contentValues = createContentValuesForFolder(folder);
-        omitInternalSyncState(contentValues);
+        omitInternalSyncState(folderValues);
 
         operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
-                           .withValues(contentValues)
+                           .withValues(folderValues)
                            .withSelection(ProviderTableMeta._ID + " = ?", new String[]{String.valueOf(folder.getFileId())})
                            .build());
 

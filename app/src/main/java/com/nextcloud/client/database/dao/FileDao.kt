@@ -31,6 +31,12 @@ interface FileDao {
     fun updateInternalSyncEnrollment(fileOwner: String, id: Long, path: String, timestamp: Long): Int
 
 
+    @Query("UPDATE filelist SET last_sync_date_for_data = :timestamp WHERE _id = :id AND file_owner = :fileOwner")
+    fun updateFolderSyncTime(fileOwner: String, id: Long, timestamp: Long): Int
+
+    @Query("UPDATE filelist SET content_length = :size WHERE _id = :id AND file_owner = :fileOwner")
+    fun updateFolderSize(fileOwner: String, id: Long, size: Long): Int
+
     @Update
     fun update(entity: FileEntity)
 

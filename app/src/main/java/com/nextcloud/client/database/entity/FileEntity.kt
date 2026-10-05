@@ -123,5 +123,7 @@ data class FileEntity(
     @ColumnInfo(name = ProviderTableMeta.FILE_UPLOADED)
     val uploaded: Long?,
     @ColumnInfo(name = ProviderTableMeta.FILE_IS_READ_ONLY)
-    val isReadOnly: Int?
+    val isReadOnly: Int?,
+    @ColumnInfo(name = ProviderTableMeta.FILE_FOLDER_SYNC_SNAPSHOT, defaultValue = "NULL")
+    val folderSyncSnapshot: String? = null
 )

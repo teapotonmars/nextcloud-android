@@ -92,6 +92,7 @@ public class OperationsService extends Service {
     public static final String EXTRA_SERVER_URL = "SERVER_URL";
     public static final String EXTRA_REMOTE_PATH = "REMOTE_PATH";
     public static final String EXTRA_SYNC_ALL = "SYNC_ALL";
+    public static final String EXTRA_SYNC_FOLDER_RECURSIVE_CHILD = "SYNC_FOLDER_RECURSIVE_CHILD";
     public static final String EXTRA_NEWNAME = "NEWNAME";
     public static final String EXTRA_REMOVE_ONLY_LOCAL = "REMOVE_LOCAL_COPY";
     public static final String EXTRA_SYNC_FILE_CONTENTS = "SYNC_FILE_CONTENTS";
@@ -760,6 +761,8 @@ public class OperationsService extends Service {
                             useWorkerWithNotification,
                             syncAll
                         );
+                        ((SynchronizeFolderOperation) operation).setRecursiveChild(
+                            operationIntent.getBooleanExtra(EXTRA_SYNC_FOLDER_RECURSIVE_CHILD, false));
                         break;
 
                     case ACTION_MOVE_FILE:

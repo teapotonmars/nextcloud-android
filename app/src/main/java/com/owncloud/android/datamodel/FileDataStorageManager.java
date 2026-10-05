@@ -568,6 +568,23 @@ public class FileDataStorageManager {
         return mediaList;
     }
 
+    public void updateFolderSize(OCFile folder) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSize(
+            user.getAccountName(), folder.getFileId(), folder.getFileLength()));
+    }
+
+    public void saveSynchronizedFolder(OCFile remoteFolder, OCFile localFolder,
+                                       List<OCFile> children, Collection<OCFile> removed) {
+        FolderSyncLocalState.preserve(remoteFolder, localFolder);
+        saveFolder(remoteFolder, children, removed);
+        updateFolderSize(remoteFolder);
+    }
+
+    public void updateFolderSyncTime(OCFile folder, long timestamp) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSyncTime(user.getAccountName(), folder.getFileId(), timestamp));
+        folder.setLastSyncDateForData(timestamp);
+    }
+
     private static String internalSyncResultOrEmpty(String result) {
         return result == null ? "" : result;
     }

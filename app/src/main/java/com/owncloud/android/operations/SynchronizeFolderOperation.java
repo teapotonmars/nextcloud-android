@@ -21,6 +21,7 @@ import com.nextcloud.client.jobs.folderDownload.FolderDownloadWorkerNotification
 import com.nextcloud.utils.extensions.ExtensionsKt;
 import com.owncloud.android.datamodel.FileDataStorageManager;
 import com.owncloud.android.datamodel.OCFile;
+import com.owncloud.android.datamodel.FolderSyncSnapshot;
 import com.owncloud.android.datamodel.e2e.v1.decrypted.DecryptedFolderMetadataFileV1;
 import com.owncloud.android.datamodel.e2e.v2.decrypted.DecryptedFolderMetadataFile;
 import com.owncloud.android.lib.common.OwnCloudClient;
@@ -38,13 +39,13 @@ import com.owncloud.android.utils.MimeTypeUtil;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import kotlin.Unit;
 
 /**
@@ -93,6 +94,8 @@ public class SynchronizeFolderOperation extends SyncOperation {
     private final boolean useWorkerWithNotification;
 
     private final boolean syncAll;
+
+    private volatile boolean recursiveChild;
 
     final FolderDownloadWorkerNotificationManager notificationManager;
 
@@ -144,7 +147,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
             }
 
             if (syncAll) {
-                result = fetchAndSyncRemoteFolder(client);
+                result = synchronizeRecursiveInventory(client);
             } else {
                 result = checkForChanges(client);
                 if (result.isSuccess() && mRemoteFolderChanged) {
@@ -156,6 +159,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
 
             if (result.isSuccess()) {
                 syncContents();
+                getStorageManager().updateFolderSyncTime(mLocalFolder, System.currentTimeMillis());
                 if (mLocalFolder.isInConflict()) {
                     // A prior interrupted conflict cleanup may have left only the folder marker.
                     getStorageManager().clearFolderConflictIfResolved(mLocalFolder);
@@ -171,6 +175,70 @@ public class SynchronizeFolderOperation extends SyncOperation {
         }
 
         return result;
+    }
+
+    public void setRecursiveChild(boolean recursiveChild) {
+        this.recursiveChild = recursiveChild;
+    }
+
+    private RemoteOperationResult synchronizeRecursiveInventory(OwnCloudClient client)
+        throws OperationCancelledException {
+        if (mCancellationRequested.get()) {
+            throw new OperationCancelledException();
+        }
+        List<OCFile> children = getStorageManager().getFolderContent(mLocalFolder, false);
+        FolderSyncSnapshot snapshot;
+        try {
+            snapshot = FolderSyncSnapshot.decode(getStorageManager().getFolderSyncSnapshot(mRemotePath));
+        } catch (RuntimeException exception) {
+            Log_OC.e(TAG, "Could not read directory inventory certificate", exception);
+            return fetchAndSyncRemoteFolder(client);
+        }
+        if (snapshot == null || !snapshot.matches(mLocalFolder, children, System.currentTimeMillis())) {
+            return fetchAndSyncRemoteFolder(client);
+        }
+        String remoteEtag = recursiveChild ? mLocalFolder.getEtagOnServer() : null;
+        if (!recursiveChild) {
+            ReadFileRemoteOperation operation = new ReadFileRemoteOperation(mRemotePath);
+            var result = operation.execute(client);
+            if (!result.isSuccess()) {
+                if (result.getCode() == ResultCode.FILE_NOT_FOUND) {
+                    removeLocalFolder();
+                }
+                return result;
+            }
+            OCFile remoteFolder = FileStorageUtils.fillOCFile((RemoteFile) result.getData().get(0));
+            if (!FolderSyncSnapshot.eligible(remoteFolder, children) ||
+                !java.util.Objects.equals(remoteFolder.getPermissions(), mLocalFolder.getPermissions())) {
+                return fetchAndSyncRemoteFolder(client);
+            }
+            remoteEtag = remoteFolder.getEtag();
+        }
+        if (!snapshot.getEtag().equals(remoteEtag)) {
+            return fetchAndSyncRemoteFolder(client);
+        }
+        Map<Long, OCFile> localFiles = new HashMap<>();
+        if (children.stream().anyMatch(child -> !child.isFolder())) {
+            for (OCFile localFile : getStorageManager().getFolderContent(mLocalFolder, false)) {
+                localFiles.put(localFile.getFileId(), localFile);
+            }
+            if (children.stream().anyMatch(child -> !child.isFolder() && !localFiles.containsKey(child.getFileId()))) {
+                return fetchAndSyncRemoteFolder(client);
+            }
+        }
+        for (OCFile child : children) {
+            if (mCancellationRequested.get()) {
+                throw new OperationCancelledException();
+            }
+            if (child.isFolder()) {
+                startSyncFolderOperation(child.getRemotePath());
+            } else {
+                OCFile localFile = localFiles.get(child.getFileId());
+                child.setEtag(child.getEtagOnServer());
+                prepareFileSync(child, localFile);
+            }
+        }
+        return new RemoteOperationResult<>(ResultCode.OK);
     }
 
     private RemoteOperationResult checkForChanges(OwnCloudClient client) throws OperationCancelledException {
@@ -189,7 +257,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
             OCFile remoteFolder = FileStorageUtils.fillOCFile(remoteFile);
 
             // check if remote and local folder are different
-            mRemoteFolderChanged = !(remoteFolder.getEtag().equalsIgnoreCase(mLocalFolder.getEtag()));
+            mRemoteFolderChanged = !(remoteFolder.getEtag().equals(mLocalFolder.getEtag()));
 
             result = new RemoteOperationResult<>(ResultCode.OK);
 
@@ -265,6 +333,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
 
         // parse data from remote folder
         OCFile remoteFolder = FileStorageUtils.fillOCFile((RemoteFile) folderAndFiles.get(0));
+        remoteFolder.setEtagOnServer(remoteFolder.getEtag());
         remoteFolder.setParentId(mLocalFolder.getParentId());
         remoteFolder.setFileId(mLocalFolder.getFileId());
         boolean remoteFolderChanged = !remoteFolder.getEtag().equals(mLocalFolder.getEtag());
@@ -347,7 +416,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
             if (remoteFile.isFolder()) {
                 foldersToSync.add(remoteFile);
             } else {
-                syncFileOrFolder(remoteFile, localFile);
+                prepareFileSync(remoteFile, localFile);
             }
 
             updatedFiles.add(updatedFile);
@@ -364,10 +433,29 @@ public class SynchronizeFolderOperation extends SyncOperation {
         UnifiedShareSharees.fillBlocking(user, updatedFiles);
 
         storageManager.saveSynchronizedFolder(remoteFolder, mLocalFolder, updatedFiles, localFilesMap.values());
-        storageManager.updateFolderSyncTime(mLocalFolder, System.currentTimeMillis());
+        OCFile savedFolder = storageManager.getFileByPath(mRemotePath);
+        if (savedFolder != null) {
+            mLocalFolder = savedFolder;
+        }
+        if (syncAll && FolderSyncSnapshot.eligible(mLocalFolder, updatedFiles)) {
+            String inventory = FolderSyncSnapshot.fingerprint(mLocalFolder, updatedFiles);
+            List<OCFile> savedChildren = storageManager.getFolderContent(mLocalFolder, false);
+            if (inventory.equals(FolderSyncSnapshot.fingerprint(mLocalFolder, savedChildren))) {
+                // This certifies only the immediate inventory; every child must validate its own certificate.
+                try {
+                    storageManager.saveFolderSyncSnapshot(mRemotePath,
+                        new FolderSyncSnapshot(remoteFolder.getEtag(), inventory, System.currentTimeMillis()).encode());
+                } catch (RuntimeException exception) {
+                    Log_OC.e(TAG, "Could not save directory inventory certificate", exception);
+                }
+            }
+        }
         // Queued operations can start immediately and require the committed child metadata.
         for (OCFile folder : foldersToSync) {
-            syncFileOrFolder(folder, null);
+            if (mCancellationRequested.get()) {
+                throw new OperationCancelledException();
+            }
+            startSyncFolderOperation(folder.getRemotePath());
         }
     }
 
@@ -376,6 +464,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
                                              OCFile updatedFile,
                                              boolean remoteFolderChanged) {
         updatedFile.setLastSyncDateForProperties(System.currentTimeMillis());
+        updatedFile.setEtagOnServer(remoteFile.getEtag());
         if (localFile != null) {
             updatedFile.setFileId(localFile.getFileId());
             updatedFile.setLastSyncDateForData(localFile.getLastSyncDateForData());
@@ -403,40 +492,17 @@ public class SynchronizeFolderOperation extends SyncOperation {
         }
     }
 
-    /**
-     * Schedules synchronization for the given remote file or folder.
-     * <p>
-     * If the remote file is a regular file, a {@link SynchronizeFileOperation} is created
-     * and added to the list of pending file synchronizations.
-     * If the remote file is a folder, the method triggers a folder synchronization operation,
-     * which recursively synchronizes all nested files and subfolders.
-     * </p>
-     *
-     * @param remoteFile the remote file or folder to synchronize
-     * @param localFile the corresponding local file or folder
-     * @throws OperationCancelledException if the synchronization was cancelled
-     */
-    @SuppressFBWarnings("JLM")
-    private void syncFileOrFolder(OCFile remoteFile, OCFile localFile) throws OperationCancelledException {
-        if (remoteFile.isFolder()) {
-            synchronized (mCancellationRequested) {
-                if (mCancellationRequested.get()) {
-                    throw new OperationCancelledException();
-                }
-                startSyncFolderOperation(remoteFile.getRemotePath());
-            }
-        } else {
-            SynchronizeFileOperation operation = new SynchronizeFileOperation(
-                localFile,
-                remoteFile,
-                user,
-                true,
-                mContext,
-                getStorageManager(),
-                useWorkerWithNotification
-            );
-            mFilesToSyncContents.add(operation);
-        }
+    private void prepareFileSync(OCFile remoteFile, OCFile localFile) {
+        SynchronizeFileOperation operation = new SynchronizeFileOperation(
+            localFile,
+            remoteFile,
+            user,
+            true,
+            mContext,
+            getStorageManager(),
+            useWorkerWithNotification
+        );
+        mFilesToSyncContents.add(operation);
     }
 
     private void prepareOpsFromLocalKnowledge() throws OperationCancelledException {
@@ -590,6 +656,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
         intent.putExtra(OperationsService.EXTRA_ACCOUNT, user.toPlatformAccount());
         intent.putExtra(OperationsService.EXTRA_REMOTE_PATH, path);
         intent.putExtra(OperationsService.EXTRA_SYNC_ALL, syncAll);
+        intent.putExtra(OperationsService.EXTRA_SYNC_FOLDER_RECURSIVE_CHILD, syncAll);
         mContext.startService(intent);
     }
 

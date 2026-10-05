@@ -226,6 +226,7 @@ final class FolderSyncFixture implements AutoCloseable {
                 })) {
                 SynchronizeFolderOperation operation =
                     new SynchronizeFolderOperation(context, path, user, storage, false, syncAll);
+                operation.setRecursiveChild(!ROOT.equals(path));
                 results.add(operation.run(client));
             }
         }

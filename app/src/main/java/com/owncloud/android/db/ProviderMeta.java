@@ -24,7 +24,7 @@ import java.util.List;
  */
 public class ProviderMeta {
     public static final String DB_NAME = "filelist";
-    public static final int DB_VERSION = 106;
+    public static final int DB_VERSION = 107;
 
     private ProviderMeta() {
         // No instance
@@ -97,6 +97,7 @@ public class ProviderMeta {
         public static final String FILE_CONTENT_TYPE = "content_type";
         public static final String FILE_STORAGE_PATH = "media_path";
         public static final String FILE_PATH = "path";
+        public static final String FILE_FOLDER_SYNC_SNAPSHOT = "folder_sync_snapshot";
         public static final String FILE_PATH_DECRYPTED = "path_decrypted";
         public static final String FILE_ACCOUNT_OWNER = "file_owner";
         public static final String FILE_LAST_SYNC_DATE = "last_sync_date";// _for_properties, but let's keep it as it is

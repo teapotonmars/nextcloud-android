@@ -45,6 +45,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 import kotlin.Unit;
 
@@ -96,6 +98,9 @@ public class SynchronizeFolderOperation extends SyncOperation {
     private volatile FolderSyncMode syncMode;
 
     private volatile boolean recursiveChild;
+
+    private Consumer<String> childScheduler;
+    private BooleanSupplier syncAllowed = () -> true;
 
     final FolderDownloadWorkerNotificationManager notificationManager;
 
@@ -168,7 +173,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
                 }
             }
 
-            if (mCancellationRequested.get()) {
+            if (isCancellationRequested()) {
                 throw new OperationCancelledException();
             }
 
@@ -191,9 +196,18 @@ public class SynchronizeFolderOperation extends SyncOperation {
         this.syncMode = syncMode;
     }
 
+    public void setWorkerTraversal(Consumer<String> childScheduler, BooleanSupplier syncAllowed) {
+        this.childScheduler = childScheduler;
+        this.syncAllowed = syncAllowed;
+    }
+
+    private boolean isCancellationRequested() {
+        return mCancellationRequested.get() || !syncAllowed.getAsBoolean();
+    }
+
     private RemoteOperationResult synchronizeRecursiveInventory(OwnCloudClient client)
         throws OperationCancelledException {
-        if (mCancellationRequested.get()) {
+        if (isCancellationRequested()) {
             throw new OperationCancelledException();
         }
         if (syncMode.isForced()) {
@@ -240,7 +254,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
             }
         }
         for (OCFile child : children) {
-            if (mCancellationRequested.get()) {
+            if (isCancellationRequested()) {
                 throw new OperationCancelledException();
             }
             if (child.isFolder()) {
@@ -259,7 +273,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
 
         mRemoteFolderChanged = true;
 
-        if (mCancellationRequested.get()) {
+        if (isCancellationRequested()) {
             throw new OperationCancelledException();
         }
 
@@ -296,7 +310,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
 
 
     private RemoteOperationResult fetchAndSyncRemoteFolder(OwnCloudClient client) throws OperationCancelledException {
-        if (mCancellationRequested.get()) {
+        if (isCancellationRequested()) {
             throw new OperationCancelledException();
         }
 
@@ -355,7 +369,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
         mFilesForDirectDownload.clear();
         mFilesToSyncContents.clear();
 
-        if (mCancellationRequested.get()) {
+        if (isCancellationRequested()) {
             throw new OperationCancelledException();
         }
 
@@ -467,7 +481,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
         }
         // Queued operations can start immediately and require the committed child metadata.
         for (OCFile folder : foldersToSync) {
-            if (mCancellationRequested.get()) {
+            if (isCancellationRequested()) {
                 throw new OperationCancelledException();
             }
             startSyncFolderOperation(folder.getRemotePath());
@@ -548,7 +562,7 @@ public class SynchronizeFolderOperation extends SyncOperation {
         startContentSynchronizations(mFilesToSyncContents);
     }
 
-    private void startDirectDownloads() {
+    private void startDirectDownloads() throws OperationCancelledException {
         final var fileDownloadHelper = FileDownloadHelper.Companion.instance();
 
         if (useWorkerWithNotification) {
@@ -556,10 +570,8 @@ public class SynchronizeFolderOperation extends SyncOperation {
         } else {
             try {
                 for (OCFile file: mFilesForDirectDownload) {
-                    synchronized (mCancellationRequested) {
-                        if (mCancellationRequested.get()) {
-                            break;
-                        }
+                    if (isCancellationRequested()) {
+                        throw new OperationCancelledException();
                     }
 
                     if (file == null) {
@@ -581,6 +593,8 @@ public class SynchronizeFolderOperation extends SyncOperation {
                         Log_OC.d(TAG, "startDirectDownloads failed for: " + file.getFileName());
                     }
                 }
+            } catch (OperationCancelledException e) {
+                throw e;
             } catch (Exception e) {
                 Log_OC.d(TAG, "Exception caught at startDirectDownloads" + e);
             }
@@ -603,11 +617,12 @@ public class SynchronizeFolderOperation extends SyncOperation {
         String folderName = mLocalFolder.getFileName();
 
         for (int current = 0; current < filesToSyncContents.size(); current++) {
-            if (mCancellationRequested.get()) {
+            if (isCancellationRequested()) {
                 throw new OperationCancelledException();
             }
 
             final var synchronizeFileOperation = filesToSyncContents.get(current);
+            synchronizeFileOperation.setSyncAllowed(() -> !isCancellationRequested());
             final var result = synchronizeFileOperation.execute(mContext);
             final var file = synchronizeFileOperation.getLocalFile();
 
@@ -666,6 +681,10 @@ public class SynchronizeFolderOperation extends SyncOperation {
     }
 
     private void startSyncFolderOperation(String path) {
+        if (childScheduler != null) {
+            childScheduler.accept(path);
+            return;
+        }
         Intent intent = new Intent(mContext, OperationsService.class);
         intent.setAction(OperationsService.ACTION_SYNC_FOLDER);
         intent.putExtra(OperationsService.EXTRA_ACCOUNT, user.toPlatformAccount());

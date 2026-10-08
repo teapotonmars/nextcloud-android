@@ -10,6 +10,7 @@ package com.nextcloud.client.jobs
 import android.content.Context
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.nextcloud.client.account.User
 import com.nextcloud.client.account.UserAccountManager
 import com.nextcloud.client.device.PowerManagementService
 import com.nextcloud.client.network.ConnectivityService
@@ -22,6 +23,8 @@ import com.owncloud.android.lib.common.utils.Log_OC
 import com.owncloud.android.operations.SynchronizeFolderOperation
 import com.owncloud.android.utils.FileStorageUtils
 import java.io.File
+import java.util.ArrayDeque
+import java.util.function.BooleanSupplier
 
 @Suppress("Detekt.NestedBlockDepth", "ReturnCount", "LongParameterList")
 class InternalTwoWaySyncWork(
@@ -32,7 +35,9 @@ class InternalTwoWaySyncWork(
     private val connectivityService: ConnectivityService,
     private val appPreferences: AppPreferences
 ) : Worker(context, params) {
+    @Volatile
     private var shouldRun = true
+    private val operationLock = Any()
     private var operation: SynchronizeFolderOperation? = null
 
     override fun doWork(): Result {
@@ -40,13 +45,7 @@ class InternalTwoWaySyncWork(
 
         var result = true
 
-        @Suppress("ComplexCondition")
-        if (!appPreferences.isTwoWaySyncEnabled ||
-            powerManagementService.isPowerSavingEnabled ||
-            !connectivityService.isConnected ||
-            connectivityService.isInternetWalled() ||
-            !connectivityService.connectivity.isWifi
-        ) {
+        if (!constraintsAllowSync()) {
             Log_OC.d(TAG, "Not starting due to constraints!")
             return Result.success()
         }
@@ -58,7 +57,7 @@ class InternalTwoWaySyncWork(
             val folders = fileDataStorageManager.getInternalTwoWaySyncFolders(user)
 
             for (folder in folders) {
-                if (!shouldRun) {
+                if (!shouldRun || !constraintsAllowSync()) {
                     Log_OC.d(TAG, "Worker was stopped!")
                     return Result.failure()
                 }
@@ -68,18 +67,9 @@ class InternalTwoWaySyncWork(
                 }
 
                 Log_OC.d(TAG, "Folder ${folder.remotePath}: started!")
-                operation =
-                    SynchronizeFolderOperation(
-                        context,
-                        folder.remotePath,
-                        user,
-                        fileDataStorageManager,
-                        false,
-                        false
-                    )
-                val operationResult = operation?.execute(context)
+                val operationResult = synchronizeFolder(user, folder, fileDataStorageManager)
 
-                if (operationResult?.isSuccess == true) {
+                if (operationResult.isSuccess) {
                     Log_OC.d(TAG, "Folder ${folder.remotePath}: finished!")
                 } else {
                     Log_OC.d(TAG, "Folder ${folder.remotePath} failed!")
@@ -99,14 +89,85 @@ class InternalTwoWaySyncWork(
         }
     }
 
+    private fun synchronizeFolder(
+        user: User,
+        folder: OCFile,
+        storage: FileDataStorageManager
+    ): RemoteOperationResult<*> {
+        val pending = ArrayDeque<String>().apply { add(folder.remotePath) }
+        val visited = mutableSetOf<String>()
+        var result: RemoteOperationResult<*> = RemoteOperationResult<Any>(RemoteOperationResult.ResultCode.OK)
+        while (pending.isNotEmpty()) {
+            val path = pending.removeFirst()
+            if (!visited.add(path)) continue
+            val nextResult = executeFolder(user, path, folder, storage, pending)
+            if (!nextResult.isSuccess) result = nextResult
+            if (!shouldRun || !constraintsAllowSync()) {
+                return RemoteOperationResult<Any>(RemoteOperationResult.ResultCode.CANCELLED)
+            }
+        }
+        return result
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun executeFolder(
+        user: User,
+        path: String,
+        root: OCFile,
+        storage: FileDataStorageManager,
+        pending: ArrayDeque<String>
+    ): RemoteOperationResult<*> = try {
+        val nextOperation = SynchronizeFolderOperation(
+            context,
+            path,
+            user,
+            storage,
+            false,
+            // Metadata refreshes can cache ancestor ETags before descendants have been synchronized.
+            true
+        )
+        nextOperation.setRecursiveChild(path != root.remotePath)
+        val syncAllowed = BooleanSupplier {
+            shouldRun && constraintsAllowSync() &&
+                storage.getFileByPath(root.remotePath)?.let {
+                    it.fileId == root.fileId && it.internalFolderSyncTimestamp >= 0L
+                } == true
+        }
+        nextOperation.setWorkerTraversal({ pending.add(it) }, syncAllowed)
+        val canRun = synchronized(operationLock) {
+            if (syncAllowed.asBoolean) {
+                operation = nextOperation
+                true
+            } else {
+                nextOperation.cancel()
+                false
+            }
+        }
+        if (canRun) {
+            nextOperation.execute(context)
+        } else {
+            RemoteOperationResult<Any>(RemoteOperationResult.ResultCode.CANCELLED)
+        }
+    } catch (exception: RuntimeException) {
+        Log_OC.e(TAG, "Folder $path: synchronization threw an exception", exception)
+        RemoteOperationResult<Any>(exception)
+    }
+
+    private fun constraintsAllowSync(): Boolean =
+        appPreferences.isTwoWaySyncEnabled && !powerManagementService.isPowerSavingEnabled &&
+            connectivityService.isConnected && !connectivityService.isInternetWalled() &&
+            connectivityService.connectivity.isWifi
+
     private fun saveSyncResult(storage: FileDataStorageManager, folder: OCFile, result: RemoteOperationResult<*>?) {
         storage.updateInternalSyncResult(folder, System.currentTimeMillis(), result?.code?.toString())
     }
 
     override fun onStopped() {
         Log_OC.d(TAG, "OnStopped of worker called!")
-        operation?.cancel()
-        shouldRun = false
+        synchronized(operationLock) {
+            shouldRun = false
+            operation?.cancel()
+        }
         super.onStopped()
     }
 

@@ -22,6 +22,7 @@ import com.owncloud.android.datamodel.FileDataStorageManager
 import com.owncloud.android.datamodel.OCFile
 import com.owncloud.android.files.services.NameCollisionPolicy
 import com.owncloud.android.lib.common.OwnCloudClient
+import com.owncloud.android.lib.common.operations.OperationCancelledException
 import com.owncloud.android.lib.common.operations.RemoteOperationResult
 import com.owncloud.android.lib.common.utils.Log_OC
 import com.owncloud.android.lib.resources.files.ReadFileRemoteOperation
@@ -31,6 +32,7 @@ import com.owncloud.android.ui.events.DialogEvent
 import com.owncloud.android.ui.events.DialogEventType
 import com.owncloud.android.utils.FileStorageUtils
 import org.greenrobot.eventbus.EventBus
+import java.util.function.BooleanSupplier
 
 @Suppress("LongParameterList")
 class SynchronizeFileOperation : SyncOperation {
@@ -49,6 +51,8 @@ class SynchronizeFileOperation : SyncOperation {
 
     var transferWasRequested = false
         private set
+
+    var syncAllowed = BooleanSupplier { true }
 
     constructor(
         remotePath: String,
@@ -99,14 +103,21 @@ class SynchronizeFileOperation : SyncOperation {
 
     override fun run(client: OwnCloudClient?): RemoteOperationResult<*> {
         transferWasRequested = false
+        if (!syncAllowed.asBoolean) {
+            return RemoteOperationResult<Any>(RemoteOperationResult.ResultCode.CANCELLED)
+        }
 
         localFile = localFile ?: storageManager.getFileByPath(remotePath)
 
-        val result = if (localFile?.isDown == false) {
-            requestForDownload(localFile)
-            RemoteOperationResult<Any?>(RemoteOperationResult.ResultCode.OK)
-        } else {
-            syncWithServer(client)
+        val result = try {
+            if (localFile?.isDown == false) {
+                requestForDownload(localFile)
+                RemoteOperationResult<Any?>(RemoteOperationResult.ResultCode.OK)
+            } else {
+                syncWithServer(client)
+            }
+        } catch (_: OperationCancelledException) {
+            RemoteOperationResult<Any>(RemoteOperationResult.ResultCode.CANCELLED)
         }
 
         Log_OC.i(TAG, "Synchronizing ${user.accountName}, file ${localFile?.remotePath}: ${result.logMessage}")
@@ -223,6 +234,7 @@ class SynchronizeFileOperation : SyncOperation {
     }
 
     private fun requestForUpload(file: OCFile?) {
+        if (!syncAllowed.asBoolean) throw OperationCancelledException()
         FileUploadHelper.instance().uploadUpdatedFile(
             user,
             arrayOf(file),
@@ -234,6 +246,7 @@ class SynchronizeFileOperation : SyncOperation {
 
     private fun requestForDownload(file: OCFile?) {
         val file = file ?: return
+        if (!syncAllowed.asBoolean) throw OperationCancelledException()
         val fileDownloadHelper = FileDownloadHelper.instance()
 
         if (useWorkerWithNotification) {

@@ -56,6 +56,9 @@ class DownloadFileOperation(
     private val dataTransferListeners = ConcurrentHashMap.newKeySet<OnDatatransferProgressListener>()
     private var timestampForModification: Long = 0
     private val cancellationRequested = AtomicBoolean(false)
+    private val temporaryDirectory by lazy {
+        DownloadStagingDirectoryManager.instance.create(File(FileStorageUtils.getTemporalPath(user.accountName)))
+    }
     private val mainThreadHandler = Handler(Looper.getMainLooper())
 
     constructor(user: User, file: OCFile, context: Context?) : this(
@@ -89,8 +92,8 @@ class DownloadFileOperation(
             return FileStorageUtils.getDefaultSavePathFor(user.accountName, file)
         }
 
-    val tmpPath: String get() = FileStorageUtils.getTemporalPath(user.accountName) + file.remotePath
-    val tmpFolder: String get() = FileStorageUtils.getTemporalPath(user.accountName)
+    val tmpPath: String get() = tmpFolder + file.remotePath
+    val tmpFolder: String get() = temporaryDirectory.path
     val remotePath: String get() = file.remotePath
 
     val mimeType: String
@@ -133,6 +136,14 @@ class DownloadFileOperation(
         val operationContext = context.get()
             ?: return RemoteOperationResult(RemoteOperationResult.ResultCode.UNKNOWN_ERROR)
 
+        return try {
+            downloadAndSave(client, operationContext)
+        } finally {
+            if (!temporaryDirectory.deleteRecursively()) Log_OC.e(TAG, "Unable to remove download staging directory")
+        }
+    }
+
+    private fun downloadAndSave(client: OwnCloudClient, operationContext: Context): RemoteOperationResult<Unit> {
         val tmpFile = File(tmpPath)
         val (downloadOp, downloadResult) = executeDownload(client, operationContext)
 

@@ -35,11 +35,18 @@ interface FileDao {
     ): Int
 
     @Query(
-        "UPDATE filelist SET internal_two_way_sync_timestamp = :timestamp, " +
+        "UPDATE filelist SET internal_two_way_sync_timestamp = " +
+            "COALESCE(:timestamp, internal_two_way_sync_timestamp), " +
             "internal_two_way_sync_result = COALESCE(:result, internal_two_way_sync_result) " +
             "WHERE _id = :id AND file_owner = :fileOwner AND internal_two_way_sync_timestamp >= 0"
     )
-    fun updateInternalSyncResult(fileOwner: String, id: Long, timestamp: Long, result: String?): Int
+    fun updateInternalSyncResult(fileOwner: String, id: Long, timestamp: Long?, result: String?): Int
+
+    @Query(
+        "SELECT EXISTS (SELECT 1 FROM filelist WHERE _id = :id AND file_owner = :fileOwner " +
+            "AND path = :path AND internal_two_way_sync_timestamp >= 0)"
+    )
+    fun isInternalSyncEnrolled(fileOwner: String, id: Long, path: String): Boolean
 
     @Query(
         "UPDATE filelist SET internal_two_way_sync_timestamp = :timestamp " +

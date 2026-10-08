@@ -103,6 +103,7 @@ public final class AppPreferencesImpl implements AppPreferences {
     private static final String PREF__IN_APP_REVIEW_DATA = "in_app_review_data";
 
     private static final String PREF__TWO_WAY_STATUS = "two_way_sync_status";
+    private static final String PREF__INTERNAL_SYNC_RESUME_AFTER_ROOT = "internal_sync_resume_after_root";
     private static final String PREF__TWO_WAY_SYNC_INTERVAL = "two_way_sync_interval";
 
     private static final String PREF__STOP_DOWNLOAD_JOBS_ON_START = "stop_download_jobs_on_start";
@@ -832,6 +833,18 @@ public final class AppPreferencesImpl implements AppPreferences {
     @Override
     public boolean isTwoWaySyncEnabled() {
         return preferences.getBoolean(PREF__TWO_WAY_STATUS, true);
+    }
+
+    @Override
+    public String getInternalSyncResumeAfterRoot() {
+        return preferences.getString(PREF__INTERNAL_SYNC_RESUME_AFTER_ROOT, null);
+    }
+
+    @SuppressLint("ApplySharedPref")
+    @Override
+    public void setInternalSyncResumeAfterRoot(String rootId) {
+        // Persist before network work so process death cannot repeatedly favor the same root.
+        preferences.edit().putString(PREF__INTERNAL_SYNC_RESUME_AFTER_ROOT, rootId).commit();
     }
 
     @Override

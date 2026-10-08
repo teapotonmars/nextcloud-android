@@ -614,9 +614,13 @@ public class FileDataStorageManager {
         return result == null ? "" : result;
     }
 
-    public void updateInternalSyncResult(OCFile folder, long timestamp, String result) {
+    public void updateInternalSyncResult(OCFile folder, Long timestamp, String result) {
         notifyFolderUpdate(folder, fileDao.updateInternalSyncResult(
             user.getAccountName(), folder.getFileId(), timestamp, result));
+    }
+
+    public boolean isInternalSyncEnrolled(OCFile folder) {
+        return fileDao.isInternalSyncEnrolled(user.getAccountName(), folder.getFileId(), folder.getRemotePath());
     }
 
     public void updateInternalSyncEnrollment(OCFile folder, boolean enabled) {

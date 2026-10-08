@@ -352,9 +352,8 @@ public class SynchronizeFolderOperation extends SyncOperation {
         // save updated contents in local database
         UnifiedShareSharees.fillBlocking(user, updatedFiles);
 
-        storageManager.saveFolder(remoteFolder, updatedFiles, localFilesMap.values());
-        mLocalFolder.setLastSyncDateForData(System.currentTimeMillis());
-        storageManager.saveFile(mLocalFolder);
+        storageManager.saveSynchronizedFolder(remoteFolder, mLocalFolder, updatedFiles, localFilesMap.values());
+        storageManager.updateFolderSyncTime(mLocalFolder, System.currentTimeMillis());
     }
 
     private void updateLocalStateData(OCFile remoteFile, OCFile localFile, OCFile updatedFile) {
@@ -448,30 +447,6 @@ public class SynchronizeFolderOperation extends SyncOperation {
     private void syncContents(OwnCloudClient client) throws OperationCancelledException {
         startDirectDownloads();
         startContentSynchronizations(mFilesToSyncContents);
-        updateETag(client);
-    }
-
-    /**
-     * Updates the eTag of the local folder after a successful synchronization.
-     * This ensures that any changes to local files, which may alter the eTag, are correctly reflected.
-     *
-     * @param client the OwnCloudClient instance used to execute remote operations.
-     */
-    private void updateETag(OwnCloudClient client) {
-        ReadFolderRemoteOperation operation = new ReadFolderRemoteOperation(mRemotePath);
-        final var result = operation.execute(client);
-        if (!result.isSuccess()) {
-            Log_OC.w(TAG, "Cannot update eTag, read folder operation is failed");
-            return;
-        }
-
-        if (result.getData().get(0) instanceof RemoteFile remoteFile) {
-            String eTag = remoteFile.getEtag();
-            mLocalFolder.setEtag(eTag);
-
-            final FileDataStorageManager storageManager = getStorageManager();
-            storageManager.saveFile(mLocalFolder);
-        }
     }
 
     private void startDirectDownloads() {

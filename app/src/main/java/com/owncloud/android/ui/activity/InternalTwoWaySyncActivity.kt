@@ -123,8 +123,7 @@ class InternalTwoWaySyncActivity :
                     FileDownloadWorker.cancelOperation(currentUser.accountName, folder.fileId)
                     backgroundJobManager.cancelFilesDownloadJob(currentUser.accountName, folder.fileId)
 
-                    folder.internalFolderSyncTimestamp = -1L
-                    fileDataStorageManager.saveFile(folder)
+                    fileDataStorageManager.updateInternalSyncEnrollment(folder, false)
                 }
 
                 withContext(Dispatchers.Main) {

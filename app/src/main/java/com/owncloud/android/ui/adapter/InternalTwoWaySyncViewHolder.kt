@@ -48,8 +48,7 @@ class InternalTwoWaySyncViewHolder(val binding: InternalTwoWaySyncViewHolderBind
             }
 
             unset.setOnClickListener {
-                folder.internalFolderSyncTimestamp = -1L
-                dataStorageManager.saveFile(folder)
+                dataStorageManager.updateInternalSyncEnrollment(folder, false)
                 internalTwoWaySyncAdapter.update()
             }
         }

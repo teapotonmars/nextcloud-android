@@ -568,6 +568,63 @@ public class FileDataStorageManager {
         return mediaList;
     }
 
+    public void updateFolderSize(OCFile folder) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSize(
+            user.getAccountName(), folder.getFileId(), folder.getFileLength()));
+    }
+
+    public void saveSynchronizedFolder(OCFile remoteFolder, OCFile localFolder,
+                                       List<OCFile> children, Collection<OCFile> removed) {
+        FolderSyncLocalState.preserve(remoteFolder, localFolder);
+        remoteFolder.setEtagOnServer(remoteFolder.getEtag());
+        ContentValues values = createContentValuesForFolder(remoteFolder);
+        values.remove(ProviderTableMeta.FILE_PATH_DECRYPTED);
+        values.remove(ProviderTableMeta.FILE_IS_READ_ONLY);
+        values.remove(ProviderTableMeta.FILE_LAST_SYNC_DATE);
+        values.remove(ProviderTableMeta.FILE_SHAREES);
+        values.remove(ProviderTableMeta.FILE_LAST_SYNC_DATE_FOR_DATA);
+        values.remove(ProviderTableMeta.FILE_MODIFIED_AT_LAST_SYNC_FOR_DATA);
+        values.remove(ProviderTableMeta.FILE_IS_ENCRYPTED);
+        saveFolder(remoteFolder, children, removed, values);
+        updateFolderSize(remoteFolder);
+    }
+
+    public void updateFolderSyncTime(OCFile folder, long timestamp) {
+        notifyFolderUpdate(folder, fileDao.updateFolderSyncTime(user.getAccountName(), folder.getFileId(), timestamp));
+        folder.setLastSyncDateForData(timestamp);
+    }
+
+    private static String internalSyncResultOrEmpty(String result) {
+        return result == null ? "" : result;
+    }
+
+    public void updateInternalSyncResult(OCFile folder, long timestamp, String result) {
+        notifyFolderUpdate(folder, fileDao.updateInternalSyncResult(
+            user.getAccountName(), folder.getFileId(), timestamp, result));
+    }
+
+    public void updateInternalSyncEnrollment(OCFile folder, boolean enabled) {
+        long timestamp = enabled ? 0L : -1L;
+        int updatedRows = fileDao.updateInternalSyncEnrollment(
+            user.getAccountName(), folder.getFileId(), folder.getRemotePath(), timestamp);
+        if (updatedRows > 0) {
+            folder.setInternalFolderSyncTimestamp(timestamp);
+        }
+        notifyFolderUpdate(folder, updatedRows);
+    }
+
+    private void notifyFolderUpdate(OCFile folder, int updatedRows) {
+        if (updatedRows == 0) {
+            return;
+        }
+        ContentResolver resolver = getContentResolver();
+        if (resolver == null) {
+            resolver = MainApp.getAppContext().getContentResolver();
+        }
+        resolver.notifyChange(ProviderTableMeta.CONTENT_URI, null);
+        resolver.notifyChange(ContentUris.withAppendedId(ProviderTableMeta.CONTENT_URI_DIR, folder.getParentId()), null);
+    }
+
     public boolean saveFile(OCFile ocFile) {
         Log_OC.d(TAG, "saving file " + ocFile.getFileName() + " into " + ocFile.getRemotePath());
 
@@ -589,6 +646,9 @@ public class FileDataStorageManager {
             }
 
             overridden = true;
+            if (ocFile.isFolder()) {
+                omitInternalSyncState(cv);
+            }
             if (getContentResolver() != null) {
                 getContentResolver().update(ProviderTableMeta.CONTENT_URI, cv,
                                             ProviderTableMeta._ID + "=?",
@@ -743,6 +803,11 @@ public class FileDataStorageManager {
      * @param filesToRemove
      */
     public void saveFolder(OCFile folder, List<OCFile> updatedFiles, Collection<OCFile> filesToRemove) {
+        saveFolder(folder, updatedFiles, filesToRemove, createContentValuesForFolder(folder));
+    }
+
+    private void saveFolder(OCFile folder, List<OCFile> updatedFiles, Collection<OCFile> filesToRemove,
+                            ContentValues folderValues) {
         Log_OC.d(TAG, "Saving folder " + folder.getRemotePath() + " with " + updatedFiles.size()
             + " children and " + filesToRemove.size() + " files to remove");
 
@@ -761,6 +826,7 @@ public class FileDataStorageManager {
                     fileId = getFileByPath(ocFile.getRemotePath()).getFileId();
                 }
                 // updating an existing file
+                omitInternalSyncState(contentValues);
                 operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
                                    .withValues(contentValues)
                                    .withSelection(ProviderTableMeta._ID + " = ?", new String[]{String.valueOf(fileId)})
@@ -805,10 +871,10 @@ public class FileDataStorageManager {
         }
 
         // update metadata of folder
-        ContentValues contentValues = createContentValuesForFolder(folder);
+        omitInternalSyncState(folderValues);
 
         operations.add(ContentProviderOperation.newUpdate(ProviderTableMeta.CONTENT_URI)
-                           .withValues(contentValues)
+                           .withValues(folderValues)
                            .withSelection(ProviderTableMeta._ID + " = ?", new String[]{String.valueOf(folder.getFileId())})
                            .build());
 
@@ -847,6 +913,12 @@ public class FileDataStorageManager {
                 }
             }
         }
+    }
+
+    private static void omitInternalSyncState(ContentValues values) {
+        // Listings may have read the row before a worker or enrollment change committed.
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_TIMESTAMP);
+        values.remove(ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_RESULT);
     }
 
     /**
@@ -1351,6 +1423,7 @@ public class FileDataStorageManager {
         ocFile.setHidden(nullToZero(fileEntity.getHidden()) == 1);
         ocFile.setE2eCounter(fileEntity.getE2eCounter());
         ocFile.setInternalFolderSyncTimestamp(nullToMinusOne(fileEntity.getInternalTwoWaySync()));
+        ocFile.setInternalFolderSyncResult(internalSyncResultOrEmpty(fileEntity.getInternalTwoWaySyncResult()));
 
         String sharees = fileEntity.getSharees();
         // Surprisingly JSON deserialization causes significant overhead.

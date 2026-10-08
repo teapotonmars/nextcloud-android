@@ -166,6 +166,21 @@ public class TestAppPreferences {
         }
 
         @Test
+        public void resumeRootIsPersistedSynchronouslyBeforeNetworkWork() {
+            when(editor.putString("internal_sync_resume_after_root", "123")).thenReturn(editor);
+            appPreferences.setInternalSyncResumeAfterRoot("123");
+            InOrder inOrder = inOrder(editor);
+            inOrder.verify(editor).putString("internal_sync_resume_after_root", "123");
+            inOrder.verify(editor).commit();
+        }
+
+        @Test
+        public void resumeRootIsReadFromPreferences() {
+            when(sharedPreferences.getString("internal_sync_resume_after_root", null)).thenReturn("123");
+            assertEquals("123", appPreferences.getInternalSyncResumeAfterRoot());
+        }
+
+        @Test
         public void testBruteForceDelay() {
             assertEquals(0, appPreferences.computeBruteForceDelay(0));
             assertEquals(0, appPreferences.computeBruteForceDelay(2));

@@ -4,14 +4,18 @@
  */
 package com.owncloud.android.operations
 
+import com.owncloud.android.lib.common.operations.RemoteOperationResult
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.mockito.ArgumentMatchers
 import org.mockito.Mockito
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.function.BooleanSupplier
 
 class FileCheckFastPathTest {
     @get:Rule
@@ -52,5 +56,26 @@ class FileCheckFastPathTest {
         Mockito.verify(fixture.storage).saveConflict(file, null)
         assertEquals(0, fixture.downloads.size)
         assertEquals(0, fixture.notificationUpdates)
+    }
+
+    @Test
+    fun changedConstraintsBeforeDownloadReturnCancellationWithoutStartingATransfer() {
+        val file = fixture.local.getValue(FolderSyncFixture.ROOT + "a/deep/file0")
+        file.setStoragePath(null)
+        val operation = SynchronizeFileOperation(
+            file,
+            null,
+            fixture.user,
+            true,
+            fixture.context,
+            fixture.storage,
+            false
+        )
+        val checks = AtomicInteger()
+        operation.syncAllowed = BooleanSupplier { checks.incrementAndGet() == 1 }
+        val result = operation.execute(fixture.client)
+        assertEquals(RemoteOperationResult.ResultCode.CANCELLED, result.code)
+        assertFalse(operation.transferWasRequested)
+        assertEquals(0, fixture.downloads.size)
     }
 }

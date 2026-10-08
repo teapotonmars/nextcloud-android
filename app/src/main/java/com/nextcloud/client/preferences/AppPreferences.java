@@ -386,6 +386,10 @@ public interface AppPreferences {
     void setTwoWaySyncStatus(boolean value);
     boolean isTwoWaySyncEnabled();
 
+    @Nullable
+    String getInternalSyncResumeAfterRoot();
+    void setInternalSyncResumeAfterRoot(@Nullable String rootId);
+
     void setTwoWaySyncInterval(Long value);
     Long getTwoWaySyncInterval();
 

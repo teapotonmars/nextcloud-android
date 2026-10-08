@@ -568,6 +568,22 @@ public class FileDataStorageManager {
         return mediaList;
     }
 
+    public String getFolderSyncSnapshot(String remotePath) {
+        OCFile folder = getFileByPath(remotePath);
+        if (folder == null || !FolderSyncSnapshot.supportsSkipping(folder, this)) {
+            return "";
+        }
+        return fileDao.getFolderSyncSnapshot(user.getAccountName(), folder.getFileId());
+    }
+
+    public void saveFolderSyncSnapshot(String remotePath, String snapshot) {
+        OCFile folder = getFileByPath(remotePath);
+        if (folder == null || !FolderSyncSnapshot.supportsSkipping(folder, this)) {
+            return;
+        }
+        fileDao.setFolderSyncSnapshot(user.getAccountName(), folder.getFileId(), snapshot);
+    }
+
     public void updateFolderSize(OCFile folder) {
         notifyFolderUpdate(folder, fileDao.updateFolderSize(
             user.getAccountName(), folder.getFileId(), folder.getFileLength()));

@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.BinaryOperator;
 
 /**
  *  Helper structure to keep the trees of folders containing any file downloading or synchronizing.
@@ -93,6 +94,11 @@ public class IndexedForest<V> {
 
     // Parent links and child sets must change atomically with the index.
     public synchronized Pair<String, String> putIfAbsent(String accountName, String remotePath, V value) {
+        return putOrMerge(accountName, remotePath, value, (previous, incoming) -> previous);
+    }
+
+    public synchronized Pair<String, String> putOrMerge(String accountName, String remotePath, V value,
+                                                       BinaryOperator<V> mergePayloads) {
         String targetKey = buildKey(accountName, remotePath);
 
         Node<V> valuedNode = new Node<>(targetKey, value);
@@ -101,14 +107,16 @@ public class IndexedForest<V> {
             valuedNode
         );
         if (previousValue != null) {
-            if (previousValue.getPayload() == null) {
-                previousValue.mPayload = value;
-                Node<V> parent = previousValue.getParent();
-                String linkedTo = parent == null ? OCFile.ROOT_PATH :
-                    parent.getKey().substring(buildAccountPrefix(accountName).length());
-                return new Pair<>(targetKey, linkedTo);
+            V previousPayload = previousValue.getPayload();
+            V mergedPayload = previousPayload == null ? value : mergePayloads.apply(previousPayload, value);
+            if (mergedPayload == previousPayload) {
+                return null;
             }
-            return null;
+            previousValue.mPayload = mergedPayload;
+            Node<V> parent = previousValue.getParent();
+            String linkedTo = parent == null ? OCFile.ROOT_PATH :
+                parent.getKey().substring(buildAccountPrefix(accountName).length());
+            return new Pair<>(targetKey, linkedTo);
 
         } else {
             // value really added

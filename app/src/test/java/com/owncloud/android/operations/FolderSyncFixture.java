@@ -51,6 +51,7 @@ final class FolderSyncFixture implements AutoCloseable {
     final Map<String, Object> encryptedMetadata = new HashMap<>();
     final Map<String, OCFile> local = new LinkedHashMap<>();
     final Map<String, OCFile> remote = new LinkedHashMap<>();
+    final Map<String, FolderSyncMode> queuedModes = new HashMap<>();
     final Set<String> failedListings = new HashSet<>();
     final Set<String> failedDownloads = new HashSet<>();
     final List<String> downloads = new ArrayList<>();
@@ -145,7 +146,7 @@ final class FolderSyncFixture implements AutoCloseable {
                 return result(!failedListings.contains(path), data);
             });
         }));
-        keep(new FolderSyncIntentMock(queue, recursiveModes, local));
+        keep(new FolderSyncIntentMock(queue, recursiveModes, local, queuedModes));
         when(user.getAccountName()).thenReturn("fixture-account");
         when(storage.getFileByPath(anyString())).thenAnswer(call -> local.get(call.getArgument(0)));
         when(storage.getFolderContent(any(OCFile.class), anyBoolean()))
@@ -226,6 +227,8 @@ final class FolderSyncFixture implements AutoCloseable {
                 })) {
                 SynchronizeFolderOperation operation =
                     new SynchronizeFolderOperation(context, path, user, storage, false, syncAll);
+                operation.setRecursiveChild(!ROOT.equals(path));
+                if (queuedModes.containsKey(path)) { operation.setSyncMode(queuedModes.remove(path)); }
                 results.add(operation.run(client));
             }
         }
@@ -247,7 +250,6 @@ final class FolderSyncFixture implements AutoCloseable {
         snapshots.put(result, copy(file));
         return result;
     }
-
     private OCFile copy(OCFile file) {
         return FolderSyncFileCopy.copy(file);
     }
@@ -273,7 +275,6 @@ final class FolderSyncFixture implements AutoCloseable {
         when(result.getData()).thenReturn(new ArrayList<>(data));
         return result;
     }
-
     private <T extends AutoCloseable> T keep(T resource) {
         mocks.add(resource);
         return resource;

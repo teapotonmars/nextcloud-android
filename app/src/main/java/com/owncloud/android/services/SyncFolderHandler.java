@@ -131,7 +131,8 @@ class SyncFolderHandler extends Handler {
 
     public void add(Account account, String remotePath,
                     SynchronizeFolderOperation syncFolderOperation){
-        Pair<String, String> putResult = mPendingOperations.putIfAbsent(account.name, remotePath, syncFolderOperation);
+        Pair<String, String> putResult = mPendingOperations.putOrMerge(account.name, remotePath, syncFolderOperation,
+            (previous, incoming) -> incoming.getSyncMode().compareTo(previous.getSyncMode()) > 0 ? incoming : previous);
         if (putResult != null) {
             fileDownloadEventBroadcaster.sendDownloadEnqueued(account.name,
                                                               remotePath,

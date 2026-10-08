@@ -63,6 +63,7 @@ import com.owncloud.android.operations.RenameFileOperation;
 import com.owncloud.android.operations.SetFilesDownloadLimitOperation;
 import com.owncloud.android.operations.SynchronizeFileOperation;
 import com.owncloud.android.operations.SynchronizeFolderOperation;
+import com.owncloud.android.operations.FolderSyncMode;
 import com.owncloud.android.operations.UnshareOperation;
 import com.owncloud.android.operations.UpdateNoteForShareOperation;
 import com.owncloud.android.operations.UpdateShareInfoOperation;
@@ -92,6 +93,8 @@ public class OperationsService extends Service {
     public static final String EXTRA_SERVER_URL = "SERVER_URL";
     public static final String EXTRA_REMOTE_PATH = "REMOTE_PATH";
     public static final String EXTRA_SYNC_ALL = "SYNC_ALL";
+    public static final String EXTRA_FORCE_LISTING = "FORCE_LISTING";
+    public static final String EXTRA_SYNC_FOLDER_RECURSIVE_CHILD = "SYNC_FOLDER_RECURSIVE_CHILD";
     public static final String EXTRA_NEWNAME = "NEWNAME";
     public static final String EXTRA_REMOVE_ONLY_LOCAL = "REMOVE_LOCAL_COPY";
     public static final String EXTRA_SYNC_FILE_CONTENTS = "SYNC_FILE_CONTENTS";
@@ -760,6 +763,12 @@ public class OperationsService extends Service {
                             useWorkerWithNotification,
                             syncAll
                         );
+                        ((SynchronizeFolderOperation) operation).setRecursiveChild(
+                            operationIntent.getBooleanExtra(EXTRA_SYNC_FOLDER_RECURSIVE_CHILD, false));
+                        if (operationIntent.getBooleanExtra(EXTRA_FORCE_LISTING, false)) {
+                            ((SynchronizeFolderOperation) operation).setSyncMode(
+                                FolderSyncMode.RECURSIVE_FORCED);
+                        }
                         break;
 
                     case ACTION_MOVE_FILE:

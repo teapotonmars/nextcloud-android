@@ -885,6 +885,7 @@ public class FileOperationsHelper {
         intent.putExtra(OperationsService.EXTRA_ACCOUNT, fileActivity.getAccount());
         intent.putExtra(OperationsService.EXTRA_REMOTE_PATH, file.getRemotePath());
         intent.putExtra(OperationsService.EXTRA_SYNC_ALL, syncAll);
+        intent.putExtra(OperationsService.EXTRA_FORCE_LISTING, syncAll);
 
         fileActivity.startService(intent);
     }

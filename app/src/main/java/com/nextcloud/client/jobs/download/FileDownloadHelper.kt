@@ -82,6 +82,7 @@ class FileDownloadHelper {
             modificationTimestamp = currentDownload?.getModificationTimestamp() ?: 0L
             modificationTimestampAtLastSyncForData = currentDownload?.getModificationTimestamp() ?: 0L
             etag = currentDownload?.etag
+            etagOnServer = currentDownload?.etag
             mimeType = currentDownload?.mimeType
             storagePath = currentDownload?.savePath
 

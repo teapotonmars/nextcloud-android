@@ -134,6 +134,11 @@ public class SynchronizeFolderOperation extends SyncOperation {
      */
     @Override
     protected RemoteOperationResult run(OwnCloudClient client) {
+        return FolderSyncExecutionLock.execute(user.getAccountName(), mCancellationRequested::get,
+            () -> synchronizeFolder(client));
+    }
+
+    private RemoteOperationResult synchronizeFolder(OwnCloudClient client) {
         RemoteOperationResult result;
         mFailsInFileSyncsFound = 0;
         mConflictsFound = 0;

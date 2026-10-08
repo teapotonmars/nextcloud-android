@@ -199,6 +199,7 @@ final class FolderSyncFixture implements AutoCloseable {
     }
     void syncTree() { syncTree(true); }
     void syncTree(boolean syncAll) { syncTree(ROOT, syncAll); }
+    java.util.function.BooleanSupplier workerSyncAllowed;
     void syncTree(String root, boolean syncAll) {
         queue.add(root);
         while (!queue.isEmpty()) {
@@ -224,11 +225,14 @@ final class FolderSyncFixture implements AutoCloseable {
                     });
                     when(operation.getLocalFile()).thenAnswer(call -> actual.getLocalFile());
                     when(operation.getTransferWasRequested()).thenAnswer(call -> actual.getTransferWasRequested());
+                    doAnswer(call -> { actual.setSyncAllowed(call.getArgument(0)); return null; })
+                        .when(operation).setSyncAllowed(any());
                 })) {
                 SynchronizeFolderOperation operation =
                     new SynchronizeFolderOperation(context, path, user, storage, false, syncAll);
                 operation.setRecursiveChild(!ROOT.equals(path));
                 if (queuedModes.containsKey(path)) { operation.setSyncMode(queuedModes.remove(path)); }
+                if (workerSyncAllowed != null) { operation.setWorkerTraversal(queue::add, workerSyncAllowed); }
                 results.add(operation.run(client));
             }
         }

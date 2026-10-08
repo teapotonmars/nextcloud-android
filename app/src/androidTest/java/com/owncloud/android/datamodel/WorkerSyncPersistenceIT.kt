@@ -12,6 +12,7 @@ import com.nextcloud.client.account.User
 import com.owncloud.android.db.ProviderMeta.ProviderTableMeta
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -163,6 +164,42 @@ class WorkerSyncPersistenceIT {
         val afterResult = readRow("/")
         storage.updateInternalSyncEnrollment(stale, false)
         assertEquals(afterResult + (ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_TIMESTAMP to "-1"), readRow("/"))
+    }
+
+    @Test
+    fun cancelledResultPreservesThePersistedTimestampEvenWhenTheCallerIsStale() {
+        storage.updateInternalSyncEnrollment(root, true)
+        val stale = storage.getFileByPath("/")
+        storage.updateInternalSyncResult(root, 1234, "OK")
+        val before = readRow("/")
+        storage.updateInternalSyncResult(stale, null, "CANCELLED")
+        assertEquals(before + (ProviderTableMeta.FILE_INTERNAL_TWO_WAY_SYNC_RESULT to "CANCELLED"), readRow("/"))
+        storage.updateInternalSyncEnrollment(root, false)
+        storage.updateInternalSyncResult(stale, null, "OK")
+        assertEquals(-1L, storage.getFileByPath("/").internalFolderSyncTimestamp)
+        assertEquals("CANCELLED", storage.getFileByPath("/").internalFolderSyncResult)
+    }
+
+    @Test
+    fun scalarEnrollmentCheckRejectsDisabledReplacedAndOtherAccountFolders() {
+        assertFalse(storage.isInternalSyncEnrolled(root))
+        storage.updateInternalSyncEnrollment(root, true)
+        assertTrue(storage.isInternalSyncEnrolled(root))
+        val wrongPath = directory("/other/").apply { fileId = root.fileId }
+        assertFalse(storage.isInternalSyncEnrolled(wrongPath))
+        val otherUser = mock<User>()
+        whenever(otherUser.accountName).thenReturn("$account-other")
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        assertFalse(FileDataStorageManager(otherUser, resolver).isInternalSyncEnrolled(root))
+        storage.updateInternalSyncEnrollment(root, false)
+        assertFalse(storage.isInternalSyncEnrolled(root))
+        val removed = root
+        storage.removeFolder(removed, true, false)
+        root = directory("/")
+        storage.saveFile(root)
+        storage.updateInternalSyncEnrollment(root, true)
+        assertFalse(storage.isInternalSyncEnrolled(removed))
+        assertTrue(storage.isInternalSyncEnrolled(root))
     }
 
     private fun readRow(path: String): Map<String, String?> {

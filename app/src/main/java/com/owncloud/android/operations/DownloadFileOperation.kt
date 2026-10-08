@@ -34,7 +34,6 @@ import java.io.IOException
 import java.lang.ref.WeakReference
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
@@ -58,7 +57,7 @@ class DownloadFileOperation(
     private var timestampForModification: Long = 0
     private val cancellationRequested = AtomicBoolean(false)
     private val temporaryDirectory by lazy {
-        File(FileStorageUtils.getTemporalPath(user.accountName), "download-${UUID.randomUUID()}")
+        DownloadStagingDirectoryManager.instance.create(File(FileStorageUtils.getTemporalPath(user.accountName)))
     }
     private val mainThreadHandler = Handler(Looper.getMainLooper())
 
